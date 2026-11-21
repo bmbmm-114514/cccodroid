@@ -46,13 +46,18 @@ async function checkWorkbench() {
       ] });
     }
     if (checkingLogin && addr.pathname === "/api/login/status") return Response.json({ loggedIn: false });
+    if (addr.pathname === "/api/sessions") {
+      const native = await original(u, opts);
+      if (!native.ok) return native;
+      const list = await native.json();
+      return Response.json({ ...list, conversations: imported ? [{ ...chat, origin: "synthetic-ui-a" }] : [] });
+    }
     if (!addr.pathname.startsWith("/api/multi/")) return original(u, opts);
     const action = addr.pathname.split("/").pop(), body = opts?.body ? JSON.parse(opts.body) : {};
     calls.push({ action, body });
     let reply = { ok: true };
     if (action === "state") reply = { ...state, conversation: addr.searchParams.get("id") === chat.id ? chat : null };
     if (action === "create") { if (body.claudeSessionId) imported = true; reply = { id: chat.id }; }
-    if (action === "conversations") reply = {conversations: imported ? [{ ...chat, origin: "synthetic-ui-a" }] : []};
     if (action === "models") reply = { agent: addr.searchParams.get("agent"), models: [{ id: "fixture-destination", label: "Fixture" }] };
     if (action === "send") {
       if (simulateDrop === "before") { simulateDrop = ""; throw new TypeError("fixture lost connection"); }
@@ -121,6 +126,8 @@ async function checkWorkbench() {
   assert(sent().selected.length === 0, "no automatic history attached");
   await until(() => by("input").value === "", "server accepted request despite lost acknowledgement");
   await until(() => window.__cc.state.linkedClaude?.has("synthetic-ui-a"), "native ID indexed with its shared chat");
+  assert(window.__cc.state.sessions.some(row => row.id === "synthetic-ui-b"), "native list preserved after import");
+  assert(!window.__cc.state.sessions.some(row => row.id === "synthetic-ui-a"), "imported conversation appears once");
   window.__cc.openSession("synthetic-ui-b");
   await until(() => window.__cc.view.sessionId === "synthetic-ui-b" && window.__cc.view.histOk, "other native chat");
   window.__cc.openSession("synthetic-ui-a");

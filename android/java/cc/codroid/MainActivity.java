@@ -207,8 +207,7 @@ public class MainActivity extends Activity {
             ui.post(() -> stuck.setVisibility(View.VISIBLE));
             return;
         }
-        // 先起前台服务再干活：安装要下载几百 MB，期间用户一切走，
-        // 没有前台服务的进程几秒内就会被冻结/回收（实测切一下前台下载就断了）。
+        // 解包期间维持前台服务，切到其他应用后也能继续准备运行环境。
         GatewayService.start(this);
         new Thread(() -> {
             try {
@@ -268,7 +267,7 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 android.util.Log.e("cccodroid-setup", "安装失败", e);
                 say("✗ " + humanize(e));
-                say(Tr.t("（下载过的部分都留着。处理好之后点「重试」，会从这一步接着来）"));
+                say(Tr.t("处理好之后点「重试」，会从已完成的步骤继续。"));
                 ui.post(() -> { retry.setVisibility(View.VISIBLE); stuck.setVisibility(View.VISIBLE); });
             }
         }, "boot").start();

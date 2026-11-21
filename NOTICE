@@ -1,12 +1,14 @@
 cccodroid
 Copyright 2026 greyoak111 and contributors
 
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+The launcher source is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-It is a third-party launcher and is not affiliated with or endorsed by Anthropic.
-Claude Code is proprietary software of Anthropic PBC; it is NOT distributed with
-this product. It is downloaded by the user from Anthropic's official channel and
-run unmodified, subject to Anthropic's terms.
+This independent integration packages unmodified ARM64 client binaries.
+Claude Code is proprietary software of Anthropic PBC. Use is subject to
+Anthropic's terms (https://code.claude.com/docs/en/legal-and-compliance).
+Antigravity CLI is distributed by Google (https://antigravity.google/).
+OpenAI Codex is licensed under Apache-2.0. Its original license and attribution
+are included in third_party/codex and in the APK licenses directory.
 
 Bundled third-party components:
   - Shizuku-API 13.1.5 (MIT) — third_party/shizuku/LICENSE
@@ -21,6 +23,6 @@ Bundled third-party components:
     and shipped as lib/arm64-v8a/libcc7zz.so — third_party/7zip/ (License.txt,
     copying.txt, unRarLicense.txt; source and build recipe in README.md)
 
-The developer toolkit (devkit) released alongside this project consists of
+The base developer toolkit (devkit) included in the APK consists of
 unmodified Termux packages (path prefix rewritten in place), each distributed
 under its own license; see devkit.lock.json / SBOM.tsv in each devkit release.

@@ -9,12 +9,9 @@
     const ok = latest("sessions");
     try {
       const lim = state.sessLimit || 150;   // 点过「再显示」就一直按加大后的数拉，刷新不缩回去
-      const [r, main] = await Promise.all([
-        api(lim > 150 ? "/api/sessions?limit=" + lim : "/api/sessions"),
-        api("/api/multi/conversations"),
-      ]);
+      const r = await api(lim > 150 ? "/api/sessions?limit=" + lim : "/api/sessions");
       if (!ok()) return true;
-      const integrated = main.conversations || [];
+      const integrated = r.conversations || [];
       const linked = new Map();
       for (const c of integrated) {
         if (c.origin) linked.set(c.origin, "multi:" + c.id);

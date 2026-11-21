@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { CFG, PATHS } from "../gw/config.mjs";
 import { projectSlug } from "../gw/projects.mjs";
 import { routeMulti } from "../gw/multi.mjs";
+import { routeSessions } from "../gw/sessions.mjs";
 
 test("multi HTTP imports public Claude turns once, restores its project, and serves explicit account/limit state", async t => {
   const sid = randomUUID();
@@ -22,7 +23,8 @@ test("multi HTTP imports public Claude turns once, restores its project, and ser
   fs.writeFileSync(path.join(folder,sid+".jsonl"), history.map(x=>JSON.stringify(x)).join("\n")+"\n");
   const server = http.createServer(async (req,res) => {
     const url = new URL(req.url,"http://localhost");
-    await routeMulti(req,res,url,url.pathname);
+    if (url.pathname === "/api/sessions") await routeSessions(req,res,url,url.pathname);
+    else await routeMulti(req,res,url,url.pathname);
   });
   await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
   t.after(()=>{ server.closeAllConnections(); return new Promise(resolve=>server.close(resolve)); });
@@ -33,7 +35,7 @@ test("multi HTTP imports public Claude turns once, restores its project, and ser
   const {id} = await original.json();
   assert.equal((await (await post("create",{claudeSessionId:sid})).json()).id,id);
   assert.equal((await post("edit",{id,title:"Design B",pinned:true})).status,200);
-  const index = await (await fetch(base+"conversations")).json();
+  const index = await (await fetch(new URL("../sessions",base))).json();
   const row = index.conversations.find(c => c.id === id);
   assert.equal(row.origin,sid);
   assert.equal(row.nativeClaude,sid);

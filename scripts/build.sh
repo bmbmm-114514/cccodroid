@@ -65,6 +65,8 @@ mkdir -p "$A/assets/app/pre"; cp "$A/assets/pre/"* "$A/assets/app/pre/"     # pk
 cp "$A/assets/TOOLS.md" "$A/assets/app/"     # 给 claude 的工具说明（网关读进系统提示）
 # 随包的第三方许可：Shizuku-API 编进了 classes.dex，MIT 要求随包带上版权与许可原文（#110 10-003）；网页里的库各自带着 LICENSE
 mkdir -p "$A/assets/app/licenses"; cp "$ROOT/NOTICE" "$ROOT/LICENSE" "$A/assets/app/licenses/"; cp "$ROOT/third_party/shizuku/LICENSE" "$A/assets/app/licenses/Shizuku-API-LICENSE"
+cp "$ROOT/third_party/codex/LICENSE" "$A/assets/app/licenses/codex-LICENSE"
+cp "$ROOT/third_party/codex/NOTICE" "$A/assets/app/licenses/codex-NOTICE"
 # glibc 的 ld.so 以 libldlinux.so 进了 lib/：LGPL 要求随包带上许可原文和取源码的途径
 cp "$ROOT/third_party/glibc/COPYING.LIB" "$A/assets/app/licenses/glibc-COPYING.LIB"; cp "$ROOT/third_party/glibc/README.md" "$A/assets/app/licenses/glibc-README.md"
 # 7-Zip 以 libcc7zz.so 进了 lib/：LGPL 与 unRAR 许可原文、取源码的途径随包带上

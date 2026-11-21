@@ -447,7 +447,9 @@ export async function routeSessions(req, res, u, p) {
     // 会话目录读不了：以前回 200 空表，和「真的没有会话」分不出来（FIND-015）。界面会显示这条错误并给重试
     if (list.error) return sendJson(res, 500, { ok: false, error: "read_failed", message: tz("会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。", { msg: list.error }) });
     // total：用户能看到的会话一共多少个（不含后台守护会话）。列表只给最近 limit 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
-    return sendJson(res, 200, { sessions: list, workspace: CFG.workspace, count: list.length, total: list.total ?? list.length });
+    const { mainChatIndex } = await import("./multi.mjs");
+    return sendJson(res, 200, { sessions: list, conversations: mainChatIndex(), workspace: CFG.workspace,
+      count: list.length, total: list.total ?? list.length });
   }
   // ── 会话管理：批量进回收站 / 回收站 / 导出 / 导入 ──
   if (req.method === "POST" && p === "/api/sessions/trash") {

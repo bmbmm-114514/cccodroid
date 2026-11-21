@@ -127,6 +127,8 @@ function store() {
   }, holdMultiActivity);
 }
 
+export function mainChatIndex() { return store().list(); }
+
 // Use the same visible transcript parser as the existing conversation screen.
 // Do not export hidden thinking, hook input or credentials during migration.
 async function createConversation(b) {
@@ -185,7 +187,6 @@ export async function routeMulti(req, res, u, p) {
       } else throw problem("请选择有效的 Agent");
       return sendJson(res, 200, { agent, ...catalog });
     }
-    if (action === "conversations" && req.method === "GET") return sendJson(res, 200, { conversations: store().list() });
     if (action === "state" && req.method === "GET") {
       const db = store();
       const id = u.searchParams.get("id");
