@@ -191,9 +191,7 @@ public class NativeSchedulePanel {
             "删除任务"
         };
 
-        new MaterialAlertDialogBuilder(h.a)
-            .setTitle(name)
-            .setItems(items, (d, which) -> {
+        PixelChoiceSheet.actions(h.a, name, java.util.Arrays.asList(items), which -> {
                 if (which == 0) {
                     showDetails(h, id);
                 } else if (which == 1) {
@@ -221,9 +219,7 @@ public class NativeSchedulePanel {
                         .setNegativeButton("取消", null)
                         .show();
                 }
-            })
-            .setNegativeButton("取消", null)
-            .show();
+            }, index -> index != 1 || !isRunning);
     }
 
     private static void showDetails(NativeHome h, String taskId) {
@@ -378,7 +374,7 @@ public class NativeSchedulePanel {
             JSONObject m = missed.optJSONObject(i);
             items[i] = m == null ? "—" : m.optString("name", m.optString("taskId")) + " · " + fmtTime(m.optLong("at"));
         }
-        new MaterialAlertDialogBuilder(h.a).setTitle("错过的任务").setItems(items, (d, index) -> {
+        PixelChoiceSheet.actions(h.a, "错过的任务", java.util.Arrays.asList(items), index -> {
             JSONObject m = missed.optJSONObject(index);
             if (m == null) return;
             new MaterialAlertDialogBuilder(h.a).setTitle(items[index])
@@ -387,7 +383,7 @@ public class NativeSchedulePanel {
                 .setNeutralButton("跳过", (dialog, which) -> h.post("/api/sched/missed",
                     NativeHome.json("taskId", m.optString("taskId"), "act", "skip", "at", m.optLong("at")), r -> reload.run()))
                 .setNegativeButton("取消", null).show();
-        }).setNegativeButton("关闭", null).show();
+        });
     }
 
     private static String fmtFreq(JSONObject f) {

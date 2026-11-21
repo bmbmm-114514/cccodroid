@@ -216,9 +216,11 @@ public class NativeHome {
         String previous = screen;
         String previousTitle = getScreenTitle(previous);
         boolean changing = !previous.equals(id);
-        boolean tabSwitch = selectingTab || (isNavigatingBack && !committingGesture && primary(previous) && primary(id));
+        boolean workspaceSwitch = !committingGesture && NativeFiles.isWorkspace(previous) && NativeFiles.isWorkspace(id);
+        boolean tabSwitch = !workspaceSwitch && (selectingTab
+                || (!committingGesture && PixelNav.tabIndex(previous) != PixelNav.tabIndex(id)));
         PixelPageMotion.TabStart tab = changing ? motion.capture(previous, id, tabSwitch) : null;
-        if (!committingGesture) motion.reset();
+        if (!committingGesture && changing) motion.reset();
         if (!isNavigatingBack && screen != null && !screen.isEmpty() && !screen.equals(id)) {
             history.push(screen);
         }
@@ -228,13 +230,15 @@ public class NativeHome {
         this.screen = id;
         this.generation++;
         renderScreen(id);
-        if (changing) {
+        if (changing && !workspaceSwitch) {
             int direction = a.getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? -1 : 1;
             if (tabSwitch && PixelNav.tabIndex(id) < PixelNav.tabIndex(previous)) direction = -direction;
             motion.navigate(previous, previousTitle, isNavigatingBack && !selectingTab, committingGesture, direction, tab);
         }
         syncBack();
     }
+
+    boolean committingBackGesture() { return committingGesture; }
 
     boolean canGoBack() { return !disposed && !history.isEmpty(); }
 
@@ -297,7 +301,7 @@ public class NativeHome {
         leading.setContentDescription(topLevel ? "导航" : "返回");
         leading.setTooltipText(topLevel ? "导航" : "返回");
         PixelNav.sync(navigation,id);
-        this.body.removeAllViews();
+        if (!NativeFiles.isWorkspace(id) || !files.ownsBody(body)) body.removeAllViews();
 
         if ("chat".equals(id) || "sessions".equals(id)) {
             chat.show(id);

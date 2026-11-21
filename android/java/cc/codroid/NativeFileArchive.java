@@ -29,35 +29,35 @@ public class NativeFileArchive {
             JSONArray arr = res.optJSONArray("entries");
             int len = arr != null ? arr.length() : 0;
             List<String> names = new ArrayList<>();
+            names.add("全部解压");
             if (!inner.isEmpty()) names.add(".. (返回上一级)");
             for (int i = 0; i < len; i++) {
                 JSONObject o = arr.optJSONObject(i);
                 names.add(o.optString("name") + (o.optBoolean("dir") ? "/" : ""));
             }
-            new MaterialAlertDialogBuilder(h.a).setTitle(inner.isEmpty() ? "浏览压缩包" : inner)
-                    .setItems(names.toArray(new String[0]), (d, w) -> {
-                        int idx = w;
-                        if (!inner.isEmpty()) {
-                            if (idx == 0) {
-                                int slash = inner.lastIndexOf('/', inner.length() - 2);
-                                browse(h, path, slash >= 0 ? inner.substring(0, slash + 1) : "", pwd, destDir, ref);
-                                return;
-                            }
-                            idx--;
-                        }
-                        JSONObject item = arr.optJSONObject(idx);
-                        String name = item.optString("name");
-                        if (item.optBoolean("dir")) {
-                            browse(h, path, inner + name + "/", pwd, destDir, ref);
-                        } else {
-                            new MaterialAlertDialogBuilder(h.a).setTitle(name)
-                                    .setItems(new String[]{"解压此项", "全部解压"}, (di, act) ->
-                                            promptExtract(h, path, destDir, act == 0 ? Collections.singletonList(inner + name) : null, pwd, ref))
-                                    .show();
-                        }
-                    })
-                    .setPositiveButton("全部解压", (d, w) -> promptExtract(h, path, destDir, null, pwd, ref))
-                    .setNegativeButton("关闭", null).show();
+            PixelChoiceSheet.actions(h.a, inner.isEmpty() ? "浏览压缩包" : inner, names, which -> {
+                if (which == 0) {
+                    promptExtract(h, path, destDir, null, pwd, ref);
+                    return;
+                }
+                int idx = which - 1;
+                if (!inner.isEmpty()) {
+                    if (idx == 0) {
+                        int slash = inner.lastIndexOf('/', inner.length() - 2);
+                        browse(h, path, slash >= 0 ? inner.substring(0, slash + 1) : "", pwd, destDir, ref);
+                        return;
+                    }
+                    idx--;
+                }
+                JSONObject item = arr.optJSONObject(idx);
+                String name = item.optString("name");
+                if (item.optBoolean("dir")) {
+                    browse(h, path, inner + name + "/", pwd, destDir, ref);
+                } else {
+                    PixelChoiceSheet.actions(h.a, name, Arrays.asList("解压此项", "全部解压"), act ->
+                            promptExtract(h, path, destDir, act == 0 ? Collections.singletonList(inner + name) : null, pwd, ref));
+                }
+            });
         });
     }
 

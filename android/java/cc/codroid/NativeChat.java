@@ -277,13 +277,13 @@ public class NativeChat {
         String[] actions = currentChatId.isEmpty()
             ? new String[]{"历史会话", "选择项目", "接口与模型"}
             : new String[]{"历史会话", "在项目中新建会话", "接口与模型", "新建会话", "重命名"};
-        new MaterialAlertDialogBuilder(h.a).setTitle(conversationTitle).setItems(actions,(dialog,i) -> {
+        PixelChoiceSheet.actions(h.a, conversationTitle, java.util.Arrays.asList(actions), i -> {
             if (i == 0) h.nav("sessions");
             else if (i == 1) showProjectPickerDialog();
             else if (i == 2) h.nav("provider");
             else if (i == 3) h.showChat("");
             else showRenameDialog(currentChatId, conversationTitle);
-        }).show();
+        });
     }
 
     private void renderEmptyConversation() {
@@ -619,18 +619,15 @@ public class NativeChat {
 
     private void turnActions(TextView text, JSONObject turn, String role) {
         text.setOnLongClickListener(v -> {
-            android.widget.PopupMenu actions = new android.widget.PopupMenu(h.a, text);
-            actions.getMenu().add("复制").setOnMenuItemClickListener(m -> {
-                android.content.ClipboardManager clipboard = h.a.getSystemService(android.content.ClipboardManager.class);
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", turn.optString(role)));
-                return true;
+            PixelChoiceSheet.actions(h.a, "消息操作", java.util.Arrays.asList("复制", "添加书签"), which -> {
+                if (which == 0) {
+                    android.content.ClipboardManager clipboard = h.a.getSystemService(android.content.ClipboardManager.class);
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", turn.optString(role)));
+                } else {
+                    h.post("/api/bookmarks", NativeHome.json("session", "multi:"+currentChatId, "uuid", turn.optString("id"), "role", role),
+                            result -> h.notice("已添加书签"));
+                }
             });
-            actions.getMenu().add("添加书签").setOnMenuItemClickListener(m -> {
-                h.post("/api/bookmarks", NativeHome.json("session", "multi:"+currentChatId, "uuid", turn.optString("id"), "role", role),
-                    result -> h.notice("已添加书签"));
-                return true;
-            });
-            actions.show();
             return true;
         });
     }
@@ -859,7 +856,7 @@ public class NativeChat {
         h.body.setOrientation(LinearLayout.VERTICAL);
         h.setHeading("历史会话", "");
         h.headerAction("add","新建会话", () -> h.showChat(""));
-        h.onHeadingClick(() -> NativeHistoryActions.show(h,null));
+        h.onHeadingClick(() -> NativeHistoryActions.show(h));
         // List ScrollView
         ScrollView listScroll = new ScrollView(h.a);
         listScroll.setFillViewport(true);
@@ -895,7 +892,7 @@ public class NativeChat {
         Button manage = new Button(h.a,null,android.R.attr.borderlessButtonStyle);
         manage.setText("管理会话");
         manage.setTextColor(PixelUi.color(h.a,"primary"));
-        manage.setOnClickListener(v -> NativeHistoryActions.show(h,v));
+        manage.setOnClickListener(v -> NativeHistoryActions.show(h));
         controls.addView(manage);
         listContainer.addView(controls);
 
@@ -944,11 +941,11 @@ public class NativeChat {
             options.add(pinned ? "取消置顶" : "置顶");
             options.add("重命名");
             if (!claudeSid.isEmpty()) options.add("打开原 Claude 会话");
-            new MaterialAlertDialogBuilder(h.a).setTitle(title).setItems(options.toArray(new String[0]), (dialog,i) -> {
+            PixelChoiceSheet.actions(h.a, title, options, i -> {
                 if (i == 0) togglePin(sid,pinned);
                 else if (i == 1) showRenameDialog(sid,title);
                 else h.openSession(claudeSid);
-            }).show();
+            });
         };
         return NativeHistoryActions.sessionRow(h,title,meta,() -> h.showChat(sid),more);
     }
@@ -1000,9 +997,7 @@ public class NativeChat {
             ids.add(p.optString("id"));
         }
 
-        new MaterialAlertDialogBuilder(h.a)
-                .setTitle(currentChatId.isEmpty() ? "选择项目" : "在项目中新建会话")
-                .setItems(names.toArray(new String[0]), (dialog, which) -> {
+        PixelChoiceSheet.show(h.a, currentChatId.isEmpty() ? "选择项目" : "在项目中新建会话", names, ids.indexOf(h.projectId), which -> {
                     String selId = ids.get(which);
                     h.projectId = selId;
                     if (!currentChatId.isEmpty()) {
@@ -1011,9 +1006,7 @@ public class NativeChat {
                         h.remember();
                         updateHeading();
                     }
-                })
-                .setNegativeButton("取消", null)
-                .show();
+                }, null);
     }
 
     private String getProjectName(String pId) {

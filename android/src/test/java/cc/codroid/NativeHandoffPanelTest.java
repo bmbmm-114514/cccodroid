@@ -153,6 +153,7 @@ public class NativeHandoffPanelTest {
     }
 
     private static BottomSheetDialog sheet() {
+        shadowOf(Looper.getMainLooper()).idle();
         BottomSheetDialog result = (BottomSheetDialog) ShadowDialog.getLatestDialog();
         result.setDismissWithAnimation(false);
         return result;

@@ -79,10 +79,8 @@ public final class NativeAppearance {
             }
         }
 
-        AlertDialog.Builder builder = new MaterialAlertDialogBuilder(new android.view.ContextThemeWrapper(a, theme(a)));
-        builder.setTitle("选择外观风格");
-        builder.setSingleChoiceItems(items, checkedIndex, (dialog, which) -> {
-            dialog.dismiss();
+        Context ui = new android.view.ContextThemeWrapper(a, theme(a));
+        PixelChoiceSheet.show(ui, "选择外观风格", java.util.Arrays.asList(items), checkedIndex, which -> {
 
             boolean targetIsNative = (which == 0);
             String targetClassicTheme = targetIsNative ? currentClassic : SKINS[which - 1];
@@ -100,11 +98,7 @@ public final class NativeAppearance {
                 else finishChange(a, prefs.edit().putString(PENDING_SKIN, targetClassicTheme));
 
             }
-        });
-        builder.setNegativeButton("取消", null);
-
-        AlertDialog dialog = builder.create();
-        dialog.show();
+        }, null);
     }
 
     private static final String WEB_PACKET = "pending_web_conversation";

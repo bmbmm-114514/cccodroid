@@ -2,7 +2,7 @@ package cc.codroid;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
-import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 import android.net.Uri;
 import android.text.TextUtils;
 import android.widget.*;
@@ -76,22 +76,19 @@ public class NativeLineagePanel {
         for (JSONObject n : cands) {
             LinearLayout row = new LinearLayout(h.a);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            CheckBox cb = new CheckBox(h.a);
+            CheckBox cb = PixelChoiceField.checkbox(h.a);
             cb.setText(titleOf(n));
             row.addView(cb, new LinearLayout.LayoutParams(0, -2, 1f));
             pickCbs.add(cb);
             boolean canCompact = n.optJSONArray("chapters") != null && n.optJSONArray("chapters").length() > 1;
-            CheckBox cmp = new CheckBox(h.a);
+            CheckBox cmp = PixelChoiceField.checkbox(h.a);
             cmp.setText("压缩");
             cmp.setEnabled(canCompact);
             row.addView(cmp);
             compactCbs.add(cmp);
             layout.addView(row);
         }
-        ScrollView sv = new ScrollView(h.a);
-        sv.addView(layout);
-        new MaterialAlertDialogBuilder(h.a).setTitle("选择汇合会话 (2-8个)").setView(sv)
-            .setPositiveButton("提取材料", (d, w) -> {
+        PixelChoiceSheet.confirm(h.a, "选择汇合会话 (2-8个)", layout, "提取材料", () -> {
                 List<JSONObject> picked = new ArrayList<>();
                 List<String> hows = new ArrayList<>();
                 for (int i = 0; i < cands.size(); i++) {
@@ -102,7 +99,7 @@ public class NativeLineagePanel {
                 }
                 if (picked.size() < 2 || picked.size() > 8) { h.notice("请选择 2 到 8 个会话"); return; }
                 fetchMaterials(h, picked, hows, 0, new ArrayList<>());
-            }).setNegativeButton("取消", null).show();
+            });
     }
 
     private static void fetchMaterials(NativeHome h, List<JSONObject> nodes, List<String> hows, int idx, List<JSONObject> results) {
@@ -150,14 +147,12 @@ public class NativeLineagePanel {
         if (cands.isEmpty()) { h.notice("暂无可用会话"); return; }
         String[] titles = new String[cands.size()];
         for (int i = 0; i < cands.size(); i++) titles[i] = titleOf(cands.get(i));
-        new MaterialAlertDialogBuilder(h.a).setTitle("选择目标会话 (子级)")
-            .setItems(titles, (d, which) -> showExtraConfig(h, cands.get(which), cands, edges))
-            .setNegativeButton("取消", null).show();
+        PixelChoiceSheet.actions(h.a, "选择目标会话 (子级)", java.util.Arrays.asList(titles), which -> showExtraConfig(h, cands.get(which), cands, edges));
     }
 
     private static void showExtraConfig(NativeHome h, JSONObject child, List<JSONObject> all, JSONArray edges) {
         String childId = child.optString("id");
-        final AlertDialog[] picker = {null};
+        final BottomSheetDialog[] picker = {null};
         LinearLayout layout = new LinearLayout(h.a);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(h.dp(16), h.dp(8), h.dp(16), h.dp(8));
@@ -178,7 +173,7 @@ public class NativeLineagePanel {
                 btn.setOnClickListener(v -> new MaterialAlertDialogBuilder(h.a).setTitle("确认解除")
                     .setMessage("确认解除与来源 " + pid + " 的关联？")
                     .setPositiveButton("解除", (d, w) -> h.post("/api/lineage/extra",
-                        NativeHome.json("child", childId, "drop", pid), r -> { h.notice("已解除关联"); if (picker[0] != null) picker[0].dismiss(); h.nav("lineage"); }))
+                        NativeHome.json("child", childId, "drop", pid), r -> { h.notice("已解除关联"); if (picker[0] != null) picker[0].cancel(); h.nav("lineage"); }))
                     .setNegativeButton("取消", null).show());
                 layout.addView(btn);
             }
@@ -191,16 +186,13 @@ public class NativeLineagePanel {
         for (JSONObject n : all) {
             String id = n.optString("id");
             if (id.equals(childId) || existingParents.contains(id)) continue;
-            CheckBox cb = new CheckBox(h.a);
+            CheckBox cb = PixelChoiceField.checkbox(h.a);
             cb.setText(titleOf(n));
             layout.addView(cb);
             cbs.add(cb);
             parentIds.add(id);
         }
-        ScrollView sv = new ScrollView(h.a);
-        sv.addView(layout);
-        picker[0] = new MaterialAlertDialogBuilder(h.a).setTitle("补记来源：" + titleOf(child)).setView(sv)
-            .setPositiveButton("保存补记", (d, w) -> {
+        picker[0] = PixelChoiceSheet.confirm(h.a, "补记来源：" + titleOf(child), layout, "保存补记", () -> {
                 JSONArray addArr = new JSONArray();
                 for (int i = 0; i < cbs.size(); i++) {
                     if (cbs.get(i).isChecked()) addArr.put(parentIds.get(i));
@@ -209,6 +201,6 @@ public class NativeLineagePanel {
                 if (addArr.length() > 12) { h.notice("一次最多选择 12 个来源"); return; }
                 JSONObject req = NativeHome.json("child", childId, "add", addArr);
                 h.post("/api/lineage/extra", req, r -> { h.notice("补记来源成功"); h.nav("lineage"); });
-            }).setNegativeButton("取消", null).show();
+            });
     }
 }

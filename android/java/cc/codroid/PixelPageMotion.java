@@ -15,6 +15,7 @@ import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
+import androidx.core.view.OneShotPreDrawListener;
 
 /** The toolbar and content move together. The tab bar and rail stay anchored. */
 final class PixelPageMotion {
@@ -24,6 +25,7 @@ final class PixelPageMotion {
     private final ImageView image;
     private final TextView title;
     private ValueAnimator transition;
+    private OneShotPreDrawListener firstFrame;
     private String slideFrom;
     private float slideProgress;
     private float progress;
@@ -153,7 +155,7 @@ final class PixelPageMotion {
         tracking = false;
         if (!enabled() || progress == 0) { reset(); return; }
         float start = progress;
-        animateFrames(150, f -> transform(page, start * (1f - EASE.getInterpolation(f)), fromRight));
+        animateFrames(150, false, f -> transform(page, start * (1f - EASE.getInterpolation(f)), fromRight));
     }
 
     void navigate(String oldRoute, String oldTitle, boolean back, boolean interactive, int direction, TabStart tab) {
@@ -171,8 +173,8 @@ final class PixelPageMotion {
             if (tab.progress >= 1f) { reset(); return; }
             // A composite can contain portions of multiple routes and cannot be reversed as one route.
             slideFrom = tab.composite == null ? oldRoute : "";
-            animateFrames(Math.max(1L, Math.round(300f * (1f - tab.progress))), fraction -> {
-                slideProgress = tab.progress + (1f - tab.progress) * EASE.getInterpolation(fraction);
+            animateFrames(Math.max(1L, Math.round(PixelSelectionIndicator.DURATION * (1f - tab.progress))), true, fraction -> {
+                slideProgress = tab.progress + (1f - tab.progress) * PixelSelectionIndicator.EASING.getInterpolation(fraction);
                 int width = viewport.getWidth();
                 int travelled = Math.round(width * slideProgress);
                 preview.setTranslationX(-direction * travelled);
@@ -183,11 +185,11 @@ final class PixelPageMotion {
             transform(preview, initial, right);
             float startX = preview.getTranslationX();
             float endX = (right ? -1 : 1) * page.getWidth();
-            animateFrames(180, f -> preview.setTranslationX(startX + (endX - startX) * EASE.getInterpolation(f)));
+            animateFrames(180, false, f -> preview.setTranslationX(startX + (endX - startX) * EASE.getInterpolation(f)));
         } else {
             page.bringToFront();
             float distance = (back ? -direction : direction) * PixelUi.dp(page.getContext(), 16);
-            animateFrames(220, f -> fadeThrough(preview, page, f, distance));
+            animateFrames(220, false, f -> fadeThrough(preview, page, f, distance));
         }
     }
 
@@ -200,7 +202,7 @@ final class PixelPageMotion {
         incoming.setTranslationX(distance * (1f - enter));
     }
 
-    private void animateFrames(long duration, java.util.function.Consumer<Float> frame) {
+    private void animateFrames(long duration, boolean afterLayout, java.util.function.Consumer<Float> frame) {
         transition = ValueAnimator.ofFloat(0f, 1f);
         transition.setInterpolator(null);
         transition.setDuration(duration);
@@ -211,10 +213,25 @@ final class PixelPageMotion {
                 if (transition == animator) reset();
             }
         });
-        transition.start();
+        if (afterLayout && viewport.isAttachedToWindow()) {
+            // Building and measuring a destination can take several frames on a phone.
+            // Start from a laid-out frame so this work cannot consume the slide.
+            ValueAnimator next = transition;
+            firstFrame = OneShotPreDrawListener.add(viewport, () -> {
+                firstFrame = null;
+                if (next == transition) next.start();
+            });
+            viewport.invalidate();
+        } else {
+            transition.start();
+        }
     }
 
     void reset() {
+        if (firstFrame != null) {
+            firstFrame.removeListener();
+            firstFrame = null;
+        }
         if (transition != null) {
             ValueAnimator active = transition;
             transition = null;

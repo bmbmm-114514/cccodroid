@@ -82,7 +82,7 @@ public class NativeRuntimePanel {
 
         h.button(cRow, "CLI 诊断", () -> {
             String[] allow = {"doctor", "mcp list", "agents", "auth status", "plugin list", "plugins", "auto-mode"};
-            new MaterialAlertDialogBuilder(h.a).setTitle("CLI 运行诊断").setItems(allow, (d, which) -> {
+            PixelChoiceSheet.actions(h.a, "CLI 运行诊断", java.util.Arrays.asList(allow), which -> {
                 String cmd = allow[which];
                 h.get("/api/cli?cmd=" + Uri.encode(cmd), res -> {
                     String out = res.optString("out");
@@ -90,7 +90,7 @@ public class NativeRuntimePanel {
                     String full = (out.isEmpty() ? "" : out) + (err.isEmpty() ? "" : "\n[错误]\n" + err);
                     dialog(h, "诊断结果: " + cmd, full.isEmpty() ? "命令执行完毕，无输出。" : full);
                 });
-            }).setNegativeButton("取消", null).show();
+            });
         });
 
 

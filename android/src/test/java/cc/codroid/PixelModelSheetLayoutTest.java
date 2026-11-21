@@ -197,17 +197,17 @@ public class PixelModelSheetLayoutTest {
         models(3);
         layout(360, 800);
         PixelSelectionStrip strip = ancestor(label("Claude"), PixelSelectionStrip.class);
-        RectF highlight = ReflectionHelpers.getField(strip, "current");
+        RectF highlight = ((PixelSelectionIndicator) ReflectionHelpers.getField(strip, "indicator")).current;
         float from = highlight.left;
         label("Google").performClick();
-        ValueAnimator forward = ReflectionHelpers.getField(strip, "motion");
+        ValueAnimator forward = ReflectionHelpers.getField(ReflectionHelpers.getField(strip, "indicator"), "motion");
         assertNotNull(forward);
         forward.setCurrentFraction(.3f);
         float mid = highlight.left;
         assertTrue(from < mid && mid < label("Google").getLeft());
 
         label("ChatGPT").performClick();
-        ValueAnimator redirected = ReflectionHelpers.getField(strip, "motion");
+        ValueAnimator redirected = ReflectionHelpers.getField(ReflectionHelpers.getField(strip, "indicator"), "motion");
         assertNotSame(redirected, forward);
         assertEquals(mid, highlight.left, .01f);
         redirected.end();
@@ -265,9 +265,9 @@ public class PixelModelSheetLayoutTest {
             PixelSelectionStrip strip = ancestor(label("Claude"), PixelSelectionStrip.class);
             label("Google").performClick();
             models(6);
-            assertNull(ReflectionHelpers.getField(strip, "motion"));
+            assertNull(ReflectionHelpers.getField(ReflectionHelpers.getField(strip, "indicator"), "motion"));
             assertNull(ReflectionHelpers.getField(sheet, "modelMotion"));
-            RectF rect = ReflectionHelpers.getField(strip, "current");
+            RectF rect = ((PixelSelectionIndicator) ReflectionHelpers.getField(strip, "indicator")).current;
             assertEquals(label("Google").getLeft(), rect.left, .01f);
             assertEquals(0f, ((View) label("Model 5").getParent().getParent()).getTranslationX(), 0);
         } finally {

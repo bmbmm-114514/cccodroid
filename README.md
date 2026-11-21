@@ -8,7 +8,7 @@ The default Material 3 interface uses wallpaper colors on Android 12+ and a ligh
 
 Tap the native terminal output to type directly. Two rows of extra keys provide tab completion, cursor movement and paging. Tap Ctrl or Alt to apply that modifier to your next key. For example, tap Ctrl, then type C to interrupt a command.
 
-The 0.4.4 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
+The 0.4.5 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
 
 The upstream documentation and upstream APK links follow below. [Integration notes in Chinese](README.zh-CN.md#多-agent-整合分支)
 

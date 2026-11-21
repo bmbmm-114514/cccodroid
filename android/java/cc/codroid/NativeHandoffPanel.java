@@ -5,7 +5,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
@@ -207,49 +206,30 @@ final class NativeHandoffPanel {
 
     private void chooseHistory() {
         Set<String> draft = new HashSet<>(selected);
-        BottomSheetDialog dialog = PixelChoiceSheet.createDialog(ui);
-        sheet = dialog;
-        LinearLayout content = PixelChoiceSheet.content(ui, false);
-        TextView title = PixelUi.label(ui, "选择历史回合", 22, "onSurface");
-        androidx.core.view.ViewCompat.setAccessibilityHeading(title, true);
-        title.setPaddingRelative(dp(24), 0, dp(24), dp(12));
-        content.addView(title, -1, -2);
-        ScrollView scroll = new ScrollView(ui);
-        content.addView(scroll, new LinearLayout.LayoutParams(-1, -2, 1));
         LinearLayout rows = new LinearLayout(ui);
         rows.setOrientation(LinearLayout.VERTICAL);
-        rows.setPaddingRelative(dp(12), 0, dp(12), 0);
-        scroll.addView(rows);
         for (JSONObject turn : turns) {
             String id = turn.optString("id");
-            MaterialCheckBox check = new MaterialCheckBox(ui);
+            MaterialCheckBox check = PixelChoiceField.checkbox(ui);
             String summary = turn.optString("user");
             check.setText(agentName.apply(turn.optString("agent")) + " · " + summary);
             check.setMaxLines(2);
             check.setEllipsize(android.text.TextUtils.TruncateAt.END);
             check.setTextColor(PixelUi.color(ui, "onSurface"));
             check.setMinHeight(dp(48));
-            check.setBackground(PixelUi.clickable(ui, null, 12));
             check.setChecked(draft.contains(id));
             check.setOnCheckedChangeListener((unused, checked) -> {
                 if (checked) draft.add(id); else draft.remove(id);
             });
             rows.addView(check, -1, -2);
         }
-        MaterialButton done = PixelUi.button(ui, "确定", () -> {
+        sheet = PixelChoiceSheet.confirm(ui, "选择历史回合", rows, "确定", () -> {
+            if (disposed) return;
             draft.retainAll(turnIds());
             selected.clear();
             selected.addAll(draft);
             updateHistoryLabel();
-            dialog.dismiss();
         });
-        LinearLayout.LayoutParams confirm = new LinearLayout.LayoutParams(-2, -2);
-        confirm.gravity = Gravity.END;
-        confirm.setMargins(dp(16), dp(4), dp(16), dp(12));
-        content.addView(done, confirm);
-        dialog.setContentView(content);
-        PixelChoiceSheet.configure(dialog, ui, 600);
-        dialog.show();
     }
 
     void dispose() {

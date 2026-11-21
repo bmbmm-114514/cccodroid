@@ -18,6 +18,15 @@ final class NativeTerminalLayout extends LinearLayout {
         setOrientation(VERTICAL);
     }
 
+    void clearBinding() {
+        if (tabs != null) tabs.setVisibility(VISIBLE);
+        if (sessions != null) sessions.setVisibility(VISIBLE);
+        if (divider != null) divider.setVisibility(VISIBLE);
+        tabs = sessions = divider = viewport = keys = null;
+        output = null;
+        headerHidden = false;
+    }
+
     void bind(View tabs, View sessions, View divider, View viewport, TextView output, View keys) {
         this.tabs = tabs;
         this.sessions = sessions;

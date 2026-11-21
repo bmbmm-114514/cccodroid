@@ -34,8 +34,8 @@ public class NativeHooksPanel {
         root.removeAllViews();
         LinearLayout top = PixelUi.group(root);
         top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
-        scopeSpinner = new Spinner(h.a);
-        scopeSpinner.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, LABELS));
+        scopeSpinner = new PixelChoiceField(h.a, "配置范围");
+        scopeSpinner.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_item, LABELS));
         top.addView(scopeSpinner, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         top.setPadding(h.dp(8), h.dp(6), h.dp(8), h.dp(6));
 
@@ -242,12 +242,12 @@ public class NativeHooksPanel {
         LinearLayout layout = new LinearLayout(h.a); layout.setOrientation(LinearLayout.VERTICAL);
         int p = h.dp(16); layout.setPadding(p, p, p, p);
         TextView evLbl = new TextView(h.a); evLbl.setText("选择事件："); layout.addView(evLbl);
-        Spinner evSp = new Spinner(h.a);
+        Spinner evSp = new PixelChoiceField(h.a, "选择事件");
         List<String> evList = new ArrayList<>();
         JSONArray events = data.optJSONArray("events");
         if (events != null) for (int i = 0; i < events.length(); i++) evList.add(events.optString(i));
         if (evList.isEmpty()) evList.addAll(Arrays.asList("PreToolUse", "PostToolUse", "UserMessage", "AssistantMessage", "Stop"));
-        evSp.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, evList));
+        evSp.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_item, evList));
         layout.addView(evSp);
         EditText matEd = new EditText(h.a); matEd.setHint("匹配器 (可选，如 Bash / .* )"); layout.addView(matEd);
         EditText cmdEd = new EditText(h.a); cmdEd.setHint("执行命令 (必填，初始为空)"); layout.addView(cmdEd);

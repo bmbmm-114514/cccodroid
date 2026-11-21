@@ -25,7 +25,7 @@ public class NativeFrequencyPanel {
 
     public NativeFrequencyPanel(NativeHome h, LinearLayout form, JSONObject existing) {
         h.text(form, "调度类型");
-        sp = new Spinner(h.a);
+        sp = new PixelChoiceField(h.a, "调度类型");
         form.addView(sp);
         List<String> labels = new ArrayList<>(Arrays.asList("每天 (daily)", "每周 (weekly)", "每月 (monthly)", "每隔几小时 (every)", "单次运行 (once)", "Cron 表达式 (cron)"));
         String curKind = existing != null ? existing.optString("kind", "daily") : "daily";
@@ -33,7 +33,7 @@ public class NativeFrequencyPanel {
             kinds.add(curKind);
             labels.add("保留未知类型 (" + curKind + ")");
         }
-        sp.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, labels));
+        sp.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_item, labels));
 
         LinearLayout timeBox = box(form);
         h.text(timeBox, "执行时间 (HH:mm)");
@@ -44,7 +44,7 @@ public class NativeFrequencyPanel {
         String[] wNames = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
         JSONArray arr = existing != null ? existing.optJSONArray("days") : null;
         for (int i = 0; i < 7; i++) {
-            dayChecks[i] = new CheckBox(h.a);
+            dayChecks[i] = PixelChoiceField.checkbox(h.a);
             dayChecks[i].setText(wNames[i]);
             weeklyBox.addView(dayChecks[i]);
             if (arr != null) {

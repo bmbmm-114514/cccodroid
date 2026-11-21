@@ -1,6 +1,9 @@
 package cc.codroid;
 
 import android.text.InputType;
+import android.graphics.Color;
+import android.view.accessibility.AccessibilityNodeInfo;
+import com.google.android.material.radiobutton.MaterialRadioButton;
 import android.view.View;
 import android.widget.*;
 import java.time.LocalDate;
@@ -18,7 +21,7 @@ public class NativeTaskOptionsPanel {
     final double initCost;
 
     final Spinner projSpinner, effortSpinner, batSpinner, busySpinner, retrySpinner, missedSpinner, notifySpinner, untilSpinner;
-    final RadioGroup rgSession, rgPerm;
+    final RadioOptions sessionOptions, permissionOptions;
     final EditText toolsEdit, provEdit, modelEdit, minEdit, costEdit, quietEdit, untilDateEdit, untilCountEdit;
     final CheckBox cbWifi, cbChg, cbSave, cbCarry;
     final View toolsRow, quietRow, untilDateRow, untilCountRow;
@@ -27,6 +30,10 @@ public class NativeTaskOptionsPanel {
         final String id, label;
         Item(String id, String label) { this.id = id; this.label = label; }
         @Override public String toString() { return label; }
+        @Override public boolean equals(Object other) {
+            return other instanceof Item && Objects.equals(id, ((Item) other).id);
+        }
+        @Override public int hashCode() { return Objects.hashCode(id); }
     }
 
     public NativeTaskOptionsPanel(NativeHome h, LinearLayout form, JSONObject existingOrNull) {
@@ -68,10 +75,10 @@ public class NativeTaskOptionsPanel {
         loadProjects();
 
         // 2. 会话
-        rgSession = radio(form, "会话", new String[][]{{"new", "每次新开一个对话"}, {"same", "接着同一个对话"}}, initSession);
+        sessionOptions = new RadioOptions(form, "会话", new String[][]{{"new", "每次新开一个对话"}, {"same", "接着同一个对话"}}, initSession);
 
         // 3. 权限与工具
-        rgPerm = radio(form, "权限", new String[][]{
+        permissionOptions = new RadioOptions(form, "权限", new String[][]{
             {"ro", "只读（按任务的只读工具清单运行）"},
             {"proj", "可以改项目目录里的文件"},
             {"custom", "自己挑允许的工具"}
@@ -81,7 +88,7 @@ public class NativeTaskOptionsPanel {
         toolsEdit.setHint("如：Bash(git *),WebFetch,Read");
         toolsRow = row(form, "允许工具（白名单）", toolsEdit);
         toolsRow.setVisibility("custom".equals(initPerm) ? View.VISIBLE : View.GONE);
-        rgPerm.setOnCheckedChangeListener((g, id) -> toolsRow.setVisibility("custom".equals(getRadio(g)) ? View.VISIBLE : View.GONE));
+        permissionOptions.changed = () -> toolsRow.setVisibility("custom".equals(permissionOptions.value()) ? View.VISIBLE : View.GONE);
 
         // 4. 高级折叠面板
         Button btnAdv = new Button(h.a);
@@ -104,8 +111,8 @@ public class NativeTaskOptionsPanel {
 
         // 运行条件
         h.text(adv, "运行条件（不满足则跳过）");
-        cbWifi = new CheckBox(h.a); cbWifi.setText("只在 Wi-Fi 下"); cbWifi.setChecked(initWifi); adv.addView(cbWifi);
-        cbChg = new CheckBox(h.a); cbChg.setText("只在充电时"); cbChg.setChecked(initChg); adv.addView(cbChg);
+        cbWifi = PixelChoiceField.checkbox(h.a); cbWifi.setText("只在 Wi-Fi 下"); cbWifi.setChecked(initWifi); adv.addView(cbWifi);
+        cbChg = PixelChoiceField.checkbox(h.a); cbChg.setText("只在充电时"); cbChg.setChecked(initChg); adv.addView(cbChg);
         batSpinner = spinner(adv, "电量低于多少跳过", items("0", "不管", "15", "15%", "30", "30%", "50", "50%"), String.valueOf(initBat));
 
         // 冲突处理
@@ -126,8 +133,8 @@ public class NativeTaskOptionsPanel {
         quietRow.setVisibility("found".equals(initNotify) ? View.VISIBLE : View.GONE);
         notifySpinner.setOnItemSelectedListener(new SimpleSelectedListener(() -> quietRow.setVisibility("found".equals(getSpinnerId(notifySpinner)) ? View.VISIBLE : View.GONE)));
 
-        cbSave = new CheckBox(h.a); cbSave.setText("结果存成对话（列表带标记）"); cbSave.setChecked(initSave); adv.addView(cbSave);
-        cbCarry = new CheckBox(h.a); cbCarry.setText("把上一次的结果带上"); cbCarry.setChecked(initCarry); adv.addView(cbCarry);
+        cbSave = PixelChoiceField.checkbox(h.a); cbSave.setText("结果存成对话（列表带标记）"); cbSave.setChecked(initSave); adv.addView(cbSave);
+        cbCarry = PixelChoiceField.checkbox(h.a); cbCarry.setText("把上一次的结果带上"); cbCarry.setChecked(initCarry); adv.addView(cbCarry);
 
         // 有效期
         untilSpinner = spinner(adv, "有效期", items("ever", "一直有效", "date", "到某天为止", "count", "跑满几次就关"), initUntilKind);
@@ -169,7 +176,6 @@ public class NativeTaskOptionsPanel {
             }
             String cur = getSpinnerId(projSpinner);
             ArrayAdapter<Item> ad = new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_item, updated);
-            ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             projSpinner.setAdapter(ad);
             for (int i = 0; i < updated.size(); i++) {
                 if (Objects.equals(updated.get(i).id, cur)) { projSpinner.setSelection(i); break; }
@@ -209,7 +215,7 @@ public class NativeTaskOptionsPanel {
             if (!isPreserved && !validProjects.contains(curProjId)) throw new IllegalArgumentException("所选项目不在有效项目列表中");
         }
 
-        String curSession = getRadio(rgSession), curPerm = getRadio(rgPerm);
+        String curSession = sessionOptions.value(), curPerm = permissionOptions.value();
         String curTools = toolsEdit.getText().toString().trim(), curProv = provEdit.getText().toString().trim();
         String curModel = modelEdit.getText().toString().trim(), curEffort = getSpinnerId(effortSpinner);
         boolean curWifi = cbWifi.isChecked(), curChg = cbChg.isChecked();
@@ -307,14 +313,13 @@ public class NativeTaskOptionsPanel {
 
     Spinner spinner(LinearLayout p, String label, List<Item> items, String cur) {
         if (label != null) h.text(p, label);
-        Spinner sp = new Spinner(h.a);
+        Spinner sp = new PixelChoiceField(h.a, label);
         if (cur != null && !cur.isEmpty()) {
             boolean found = false;
             for (Item it : items) { if (cur.equals(it.id)) { found = true; break; } }
             if (!found) items.add(new Item(cur, cur));
         }
         ArrayAdapter<Item> ad = new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_item, items);
-        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         sp.setAdapter(ad);
         if (cur != null) {
             for (int i = 0; i < items.size(); i++) {
@@ -325,34 +330,49 @@ public class NativeTaskOptionsPanel {
         return sp;
     }
 
-    RadioGroup radio(LinearLayout p, String label, String[][] opts, String cur) {
-        if (label != null) h.text(p, label);
-        RadioGroup rg = new RadioGroup(h.a);
-        for (String[] o : opts) {
-            RadioButton rb = new RadioButton(h.a);
-            rb.setText(o[1]);
-            rb.setTag(o[0]);
-            rg.addView(rb);
-            if (o[0].equals(cur)) rb.setChecked(true);
-        }
-        if (rg.getCheckedRadioButtonId() == -1) {
-            RadioButton extra = new RadioButton(h.a);
-            extra.setText("保留原设置 (" + cur + ")");
-            extra.setTag(cur);
-            rg.addView(extra);
-            extra.setChecked(true);
-        }
-        p.addView(rg);
-        return rg;
-    }
+    private final class RadioOptions {
+        final PixelSelectionStrip strip;
+        private MaterialRadioButton selected;
+        Runnable changed;
 
-    static String getRadio(RadioGroup rg) {
-        int id = rg.getCheckedRadioButtonId();
-        if (id != -1) {
-            View v = rg.findViewById(id);
-            if (v != null && v.getTag() != null) return v.getTag().toString();
+        RadioOptions(LinearLayout parent, String label, String[][] options, String initial) {
+            h.text(parent, label);
+            strip = new PixelSelectionStrip(h.a, Color.TRANSPARENT, PixelUi.color(h.a, "primaryContainer"), h.dp(16));
+            strip.setOrientation(LinearLayout.VERTICAL);
+            strip.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+                @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo node) {
+                    super.onInitializeAccessibilityNodeInfo(host, node);
+                    node.setCollectionInfo(AccessibilityNodeInfo.CollectionInfo.obtain(strip.getChildCount(), 1,
+                            false, AccessibilityNodeInfo.CollectionInfo.SELECTION_MODE_SINGLE));
+                }
+            });
+            parent.addView(strip, -1, -2);
+            for (String[] option : options) add(option[0], option[1], option[0].equals(initial));
+            if (selected == null) add(initial, "保留原设置 (" + initial + ")", true);
         }
-        return "";
+
+        private void add(String id, String label, boolean checked) {
+            MaterialRadioButton button = new MaterialRadioButton(h.a);
+            button.setTag(id);
+            button.setText(label);
+            button.setMinHeight(h.dp(48));
+            button.setPaddingRelative(h.dp(12), h.dp(4), h.dp(12), h.dp(4));
+            button.setBackground(PixelUi.clickable(h.a, null, 16));
+            button.setOnClickListener(v -> select(button, true));
+            strip.addView(button, -1, -2);
+            if (checked) select(button, false);
+        }
+
+        private void select(MaterialRadioButton button, boolean animate) {
+            if (selected == button) return;
+            if (selected != null) selected.setChecked(false);
+            selected = button;
+            button.setChecked(true);
+            strip.select(strip.indexOfChild(button), animate);
+            if (changed != null) changed.run();
+        }
+
+        String value() { return (String) selected.getTag(); }
     }
 
     static String getSpinnerId(Spinner sp) {

@@ -68,8 +68,8 @@ public class NativeMcpEditorPanel {
         root.addView(nameEt);
 
         TextView t2 = new TextView(ctx); t2.setText("传输协议"); root.addView(t2);
-        Spinner transSp = new Spinner(ctx);
-        transSp.setAdapter(new ArrayAdapter<>(ctx, android.R.layout.simple_spinner_dropdown_item, transports));
+        Spinner transSp = new PixelChoiceField(ctx, "传输协议");
+        transSp.setAdapter(new ArrayAdapter<>(ctx, android.R.layout.simple_spinner_item, transports));
         int initPos = 0;
         if ("http".equals(origTrans)) initPos = 1;
         else if ("sse".equals(origTrans)) initPos = 2;
@@ -304,7 +304,7 @@ public class NativeMcpEditorPanel {
             TextView tv = new TextView(ctx);
             tv.setText((isEnv ? "[Env] " : "[Header] ") + k);
             tv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
-            CheckBox cb = new CheckBox(ctx);
+            CheckBox cb = PixelChoiceField.checkbox(ctx);
             cb.setText("删除");
             row.addView(tv);
             row.addView(cb);

@@ -11,9 +11,8 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Menu;
+import java.util.Arrays;
 import android.widget.ImageButton;
-import android.widget.PopupMenu;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -62,10 +61,8 @@ public final class NativePanels {
     private static void showProjects(NativeHome h, LinearLayout c) {
         h.headerAction("refresh", "刷新项目列表", () -> h.nav("projects"));
         PixelUi.row(PixelUi.group(c), "add", "添加项目", "创建文件夹、打开已有目录或克隆 Git 仓库", () ->
-                new MaterialAlertDialogBuilder(h.a).setTitle("添加项目")
-                        .setItems(new String[]{"新建空目录", "添加已有目录", "克隆 Git 项目"}, (dialog, index) ->
-                                createProjectDialog(h, new String[]{"new", "dir", "git"}[index]))
-                        .setNegativeButton("取消", null).show());
+                PixelChoiceSheet.actions(h.a, "添加项目", Arrays.asList("新建空目录", "添加已有目录", "克隆 Git 项目"),
+                        index -> createProjectDialog(h, new String[]{"new", "dir", "git"}[index])));
 
         TextView loading = h.text(c, "正在读取项目列表...");
         loading.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
@@ -115,7 +112,7 @@ public final class NativePanels {
                 final String finalName = name;
 
                 ImageButton moreBtn = PixelUi.icon(h.a, "more", name + "的项目操作", null);
-                moreBtn.setOnClickListener(v -> showProjectItemMenu(h, v, pid, finalName, isActive));
+                moreBtn.setOnClickListener(v -> showProjectItemMenu(h, pid, finalName, isActive));
 
                 LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -127,33 +124,21 @@ public final class NativePanels {
         });
     }
 
-    private static void showProjectItemMenu(NativeHome h, View anchor, String pid, String name, boolean isActive) {
-        PopupMenu popup = new PopupMenu(h.a, anchor);
-        popup.setGravity(Gravity.END);
-
-        popup.getMenu().add(Menu.NONE, 1, 2, isActive ? "取消选择当前项目" : "设为当前项目");
-        popup.getMenu().add(Menu.NONE, 2, 3, "在此项目新建对话");
-        popup.getMenu().add(Menu.NONE, 3, 4, "删除项目");
-
-        popup.setOnMenuItemClickListener(item -> {
-            int id = item.getItemId();
-            if (id == 1) {
+    private static void showProjectItemMenu(NativeHome h, String pid, String name, boolean isActive) {
+        PixelChoiceSheet.actions(h.a, name, Arrays.asList(isActive ? "取消选择当前项目" : "设为当前项目",
+                "在此项目新建对话", "删除项目"), which -> {
+            if (which == 0) {
                 h.projectId = isActive ? "" : pid;
                 h.notice(isActive ? "已取消选择项目" : "已选择项目 " + name);
                 h.nav("projects");
-                return true;
-            } else if (id == 2) {
+            } else if (which == 1) {
                 h.projectId = pid;
                 h.chatId = "";
                 h.nav("chat");
-                return true;
-            } else if (id == 3) {
+            } else {
                 confirmDeleteProject(h, pid, name);
-                return true;
             }
-            return false;
         });
-        popup.show();
     }
 
     private static void confirmDeleteProject(NativeHome h, String pid, String name) {
@@ -640,20 +625,14 @@ public final class NativePanels {
                     }
                 }
 
-                CharSequence[] items = names.toArray(new CharSequence[0]);
-                new MaterialAlertDialogBuilder(h.a)
-                        .setTitle("输出格式风格")
-                        .setSingleChoiceItems(items, checked, (dialog, which) -> {
-                            dialog.dismiss();
-                            String sid = ids.get(which);
-                            String sname = names.get(which);
-                            h.post("/api/settings", NativeHome.json("outputStyle", sid), r -> {
-                                h.notice(sid.isEmpty() ? "已恢复默认输出风格" : "输出风格已切换为: " + sname);
-                                h.nav("set-workspace");
-                            });
-                        })
-                        .setNegativeButton("取消", null)
-                        .show();
+                PixelChoiceSheet.show(h.a, "输出格式风格", names, checked, which -> {
+                    String sid = ids.get(which);
+                    String sname = names.get(which);
+                    h.post("/api/settings", NativeHome.json("outputStyle", sid), r -> {
+                        h.notice(sid.isEmpty() ? "已恢复默认输出风格" : "输出风格已切换为: " + sname);
+                        h.nav("set-workspace");
+                    });
+                }, null);
             });
         });
 
@@ -673,27 +652,20 @@ public final class NativePanels {
                     modes.add(m);
                 }
                 int activeIndex = modes.indexOf(active);
-                CharSequence[] items = modes.toArray(new CharSequence[0]);
-
-                new MaterialAlertDialogBuilder(h.a)
-                        .setTitle("切换底层运行模式")
-                        .setSingleChoiceItems(items, activeIndex, (dialog, which) -> {
-                            dialog.dismiss();
-                            String selectedMode = modes.get(which);
-                            new MaterialAlertDialogBuilder(h.a)
-                                    .setTitle("切换执行模式")
-                                    .setMessage("切换底层执行模式并立即重启网关吗？")
-                                    .setPositiveButton("确定", (d2, w2) -> {
-                                        h.post("/api/exec-mode", NativeHome.json("mode", selectedMode, "restart", true), r -> {
-                                            h.notice("已下发切换模式指令并重启网关");
-                                            h.nav("set-workspace");
-                                        });
-                                    })
-                                    .setNegativeButton("取消", null)
-                                    .show();
-                        })
-                        .setNegativeButton("取消", null)
-                        .show();
+                PixelChoiceSheet.show(h.a, "切换底层运行模式", modes, activeIndex, which -> {
+                    String selectedMode = modes.get(which);
+                    new MaterialAlertDialogBuilder(h.a)
+                            .setTitle("切换执行模式")
+                            .setMessage("切换底层执行模式并立即重启网关吗？")
+                            .setPositiveButton("确定", (d2, w2) -> {
+                                h.post("/api/exec-mode", NativeHome.json("mode", selectedMode, "restart", true), r -> {
+                                    h.notice("已下发切换模式指令并重启网关");
+                                    h.nav("set-workspace");
+                                });
+                            })
+                            .setNegativeButton("取消", null)
+                            .show();
+                }, null);
             });
         });
     }

@@ -1,9 +1,18 @@
 package cc.codroid;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.PixelFormat;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.graphics.Typeface;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -39,6 +48,17 @@ public final class PixelNav {
             item.setIcon(PixelUi.drawable(ctx, PRIMARY[i][2]));
         }
 
+        ViewGroup menuView = bar.getMenuViewGroup();
+        // Keep Material's measured icon slots and ripple targets. Paint one highlight below them.
+        bar.setItemActiveIndicatorEnabled(true);
+        bar.setItemActiveIndicatorColor(ColorStateList.valueOf(Color.TRANSPARENT));
+        MenuHighlight highlight = new MenuHighlight(bar);
+        menuView.setBackground(highlight);
+        menuView.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {}
+            @Override public void onViewDetachedFromWindow(View v) { highlight.clear(); }
+        });
+
         bar.setOnItemSelectedListener(item -> {
             int idx = item.getItemId() - 1;
             if (idx >= 0 && idx < PRIMARY.length) {
@@ -62,10 +82,10 @@ public final class PixelNav {
         if (id.startsWith("project_detail:")) id = "projects";
         switch (id) {
             case "projects":
-            case "git":
             case "bookmarks":
                 target = ID_PROJECTS;
                 break;
+            case "git":
             case "terminal":
             case "editor":
             case "files":
@@ -95,7 +115,42 @@ public final class PixelNav {
         MenuItem item = bar.getMenu().findItem(tabIndex(id));
         if (item != null) {
             item.setChecked(true);
+            bar.getMenuViewGroup().invalidate();
         }
+    }
+
+    private static final class MenuHighlight extends Drawable {
+        private final NavigationBarView bar;
+        private final ViewGroup menu;
+        private final Rect slotBounds = new Rect();
+        private final PixelSelectionIndicator indicator;
+        private int lastWidth, lastHeight;
+
+        MenuHighlight(NavigationBarView bar) {
+            this.bar = bar;
+            menu = bar.getMenuViewGroup();
+            indicator = new PixelSelectionIndicator(menu, PixelUi.color(bar.getContext(), "primaryContainer"),
+                    PixelUi.dp(bar.getContext(), 24));
+        }
+
+        @Override public void draw(Canvas canvas) {
+            View item = menu.findViewById(bar.getSelectedItemId());
+            if (item == null) return;
+            View slot = item.findViewById(com.google.android.material.R.id.navigation_bar_item_active_indicator_view);
+            if (slot == null || slot.getWidth() == 0 || slot.getHeight() == 0) return;
+            slot.getDrawingRect(slotBounds);
+            menu.offsetDescendantRectToMyCoords(slot, slotBounds);
+            boolean stableLayout = lastWidth == menu.getWidth() && lastHeight == menu.getHeight();
+            lastWidth = menu.getWidth();
+            lastHeight = menu.getHeight();
+            indicator.moveTo(slotBounds.left, slotBounds.top, slotBounds.right, slotBounds.bottom, stableLayout);
+            indicator.draw(canvas);
+        }
+
+        void clear() { indicator.moveTo(0, 0, 0, 0, false); }
+        @Override public void setAlpha(int alpha) {}
+        @Override public void setColorFilter(ColorFilter filter) {}
+        @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
     }
 
     public static void menu(NativeHome h) {

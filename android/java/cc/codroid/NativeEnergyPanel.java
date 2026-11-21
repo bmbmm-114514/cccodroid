@@ -4,8 +4,7 @@ import android.util.ArrayMap;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import com.google.android.material.button.MaterialButton;
-import com.google.android.material.button.MaterialButtonToggleGroup;
+import java.util.Arrays;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -34,38 +33,20 @@ final class NativeEnergyPanel {
     private final LinearLayout battery, samples, bill;
     private final ArrayMap<String, JSONArray> periods = new ArrayMap<>();
     private final TextView historyStatus;
-    private String displayedPeriod, displayedBattery, displayedBill;
+    private int displayedPeriod = -1;
+    private String displayedBattery, displayedBill;
     private int energyRequest, billRequest;
+    private final PixelSegmentedTabs picker;
 
     private NativeEnergyPanel(NativeHome h, LinearLayout page) {
         this.h = h;
         battery = NativeStatusViews.section(page, "设备电池");
         LinearLayout history = NativeStatusViews.section(page, "耗电记录");
-        MaterialButtonToggleGroup picker = new MaterialButtonToggleGroup(h.a);
-        picker.setSingleSelection(true);
-        picker.setSelectionRequired(true);
+        picker = new PixelSegmentedTabs(h.a, true, this::loadEnergy);
+        picker.labels(Arrays.asList(PERIODS[0][1], PERIODS[1][1], PERIODS[2][1]));
         LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-1, -2);
         bounds.setMargins(h.dp(12), h.dp(8), h.dp(12), 0);
-        history.addView(picker, bounds);
-        for (String[] period : PERIODS) {
-            MaterialButton button = new MaterialButton(h.a);
-            button.setId(View.generateViewId());
-            button.setText(period[1]);
-            button.setTextColor(new android.content.res.ColorStateList(
-                    new int[][]{{android.R.attr.state_checked}, {}},
-                    new int[]{PixelUi.color(h.a, "onSecondaryContainer"), PixelUi.color(h.a, "onSurfaceVariant")}));
-            button.setBackgroundTintList(new android.content.res.ColorStateList(
-                    new int[][]{{android.R.attr.state_checked}, {}},
-                    new int[]{PixelUi.color(h.a, "secondaryContainer"), PixelUi.color(h.a, "surfaceContainerLow")}));
-            button.setStrokeColor(android.content.res.ColorStateList.valueOf(PixelUi.color(h.a, "outlineVariant")));
-            button.setStrokeWidth(h.dp(1));
-            button.setMinHeight(h.dp(48));
-            button.setMinWidth(0);
-            button.setContentDescription(period[2]);
-            button.setTag(period);
-            picker.addView(button, new LinearLayout.LayoutParams(0,-2,1));
-            if (period[0].equals("day")) picker.check(button.getId());
-        }
+        history.addView(picker.view, bounds);
         historyStatus = NativeStatusViews.detail(history, "");
         historyStatus.setVisibility(View.GONE);
         historyStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -79,10 +60,7 @@ final class NativeEnergyPanel {
         bill.setOrientation(LinearLayout.VERTICAL);
         system.addView(bill, -1, -2);
 
-        picker.addOnButtonCheckedListener((group, id, checked) -> {
-            if (checked) loadEnergy((String[])group.findViewById(id).getTag());
-        });
-        loadEnergy(PERIODS[1]);
+        loadEnergy(1);
     }
 
     private static void message(LinearLayout panel, String text) {
@@ -114,15 +92,18 @@ final class NativeEnergyPanel {
         }
     }
 
-    private void loadEnergy(String[] period) {
+    private void loadEnergy(int index) {
+        String[] period = PERIODS[index];
+        picker.select(index, true);
+        for (int i = 0; i < PERIODS.length; i++) picker.view.getChildAt(i).setContentDescription(PERIODS[i][2]);
         final int ticket = ++energyRequest;
         String key = period[0];
         JSONArray cached = periods.get(key);
         historyStatus.setOnClickListener(null);
         historyStatus.setClickable(false);
         historyStatus.setVisibility(View.GONE);
-        if (cached != null && !key.equals(displayedPeriod)) renderSamples(period, cached);
-        if (displayedPeriod == null) {
+        if (cached != null && displayedPeriod != index) renderSamples(index, cached);
+        if (displayedPeriod < 0) {
             historyStatus.setText("正在读取" + period[2] + "的记录…");
             historyStatus.setVisibility(View.VISIBLE);
         }
@@ -130,15 +111,15 @@ final class NativeEnergyPanel {
         h.req("GET", "/api/energy?view=" + key, null, data -> {
             if (ticket != energyRequest) return;
             if (!data.optBoolean("ok")) {
-                historyError(period, data.optString("message", "无法读取耗电记录"));
+                historyError(index, data.optString("message", "无法读取耗电记录"));
                 return;
             }
             historyStatus.setVisibility(View.GONE);
             JSONArray bars = data.optJSONArray("bars");
             if (bars == null) bars = new JSONArray();
             JSONArray previous = periods.put(key, bars);
-            if (!key.equals(displayedPeriod) || previous == null || !bars.toString().equals(previous.toString())) {
-                renderSamples(period, bars);
+            if (displayedPeriod != index || previous == null || !bars.toString().equals(previous.toString())) {
+                renderSamples(index, bars);
             }
             JSONObject state = data.optJSONObject("battery");
             String batteryKey = String.valueOf(state);
@@ -148,13 +129,13 @@ final class NativeEnergyPanel {
             }
             if (billRequest == 0 && data.optJSONObject("sys") != null) renderBill(data.optJSONObject("sys"));
         }, error -> {
-            if (ticket == energyRequest) historyError(period, error);
+            if (ticket == energyRequest) historyError(index, error);
         });
     }
 
-    private void historyError(String[] period, String error) {
-        historyStatus.setOnClickListener(v -> loadEnergy(period));
-        historyStatus.setText(period[2] + " · " + error + " · 点按重试");
+    private void historyError(int index, String error) {
+        historyStatus.setOnClickListener(v -> loadEnergy(index));
+        historyStatus.setText(PERIODS[index][2] + " · " + error + " · 点按重试");
         historyStatus.setVisibility(View.VISIBLE);
         if (displayedBattery == null) message(battery, "电池状态未知");
     }
@@ -177,8 +158,12 @@ final class NativeEnergyPanel {
         if (!state.isNull("screen")) NativeStatusViews.metric(battery, "屏幕状态", state.optBoolean("screen") ? "亮屏" : "息屏");
     }
 
-    private void renderSamples(String[] period, JSONArray bars) {
-        displayedPeriod = period[0];
+    private void renderSamples(int index, JSONArray bars) {
+        String[] period = PERIODS[index];
+        if (displayedPeriod >= 0 && displayedPeriod != index) {
+            PixelSegmentedTabs.slideContent(samples, index - displayedPeriod);
+        }
+        displayedPeriod = index;
         samples.removeAllViews();
         NativeStatusViews.detail(samples, period[2]);
         if (bars == null || bars.length() == 0) { NativeStatusViews.detail(samples, "暂无采样"); return; }

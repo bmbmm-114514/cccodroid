@@ -140,9 +140,6 @@ final class PixelModelSheet {
 
         dialog.setContentView(sheetView);
         PixelChoiceSheet.configure(dialog, ui, 560);
-        dialog.getWindow().setWindowAnimations(cc.agentui.R.style.PixelModelSheetWindowMotion);
-        View surface = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
-        surface.setBackgroundTintList(ColorStateList.valueOf(PixelUi.color(ui, "surfaceContainerLow") | 0xff000000));
         ProviderSettingsDialog.watchWindow(dialog, () -> {
             stopUpdates();
             close.run();
@@ -196,7 +193,7 @@ final class PixelModelSheet {
                 modelsContainer.setTranslationX(distance);
                 modelMotion = ValueAnimator.ofFloat(distance, 0f);
                 modelMotion.setDuration(240);
-                modelMotion.setInterpolator(PixelSelectionStrip.EASING);
+                modelMotion.setInterpolator(PixelSelectionIndicator.EASING);
                 modelMotion.addUpdateListener(a -> modelsContainer.setTranslationX((float) a.getAnimatedValue()));
                 modelMotion.start();
             }

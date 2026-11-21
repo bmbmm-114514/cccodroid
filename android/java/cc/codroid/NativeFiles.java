@@ -6,7 +6,7 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.text.TextUtils;
 import android.widget.ImageButton;
-import android.widget.PopupMenu;
+import androidx.appcompat.widget.PopupMenu;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
@@ -46,6 +46,7 @@ import java.util.concurrent.Executors;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -61,6 +62,48 @@ final class NativeFiles {
 
     private int activeMode = MODE_FILES;
     private int lastGeneration = -1;
+    private static final List<String> ROUTES = Arrays.asList("files", "editor", "git", "terminal");
+    private NativeTerminalLayout workspace;
+    private LinearLayout content;
+    private PixelSegmentedTabs modes, sessions;
+    private int renderedMode = -1;
+    private final int[] scrollOffsets = new int[4];
+    private ScrollView pageScroll;
+    private EditText editingView, gitMessageView;
+    private int caretStart, caretEnd;
+    private boolean editorFocused;
+    private String commitDraft = "";
+    private String loadedFileQuery, loadedGitDir;
+    private LinearLayout terminalHeader;
+    private ImageButton newTermButton;
+    private View terminalDivider;
+
+    static boolean isWorkspace(String route) { return ROUTES.contains(route); }
+    boolean ownsBody(ViewGroup body) { return workspace != null && workspace.getParent() == body; }
+
+    private void savePosition() {
+        if (pageScroll != null && pageScroll.isLaidOut()) scrollOffsets[renderedMode] = pageScroll.getScrollY();
+        if (editingView != null) {
+            caretStart = Math.max(0, editingView.getSelectionStart());
+            caretEnd = Math.max(0, editingView.getSelectionEnd());
+            editorFocused = editingView.hasFocus();
+        }
+        if (gitMessageView != null) commitDraft = gitMessageView.getText().toString();
+        pageScroll = null;
+        editingView = null;
+        gitMessageView = null;
+    }
+
+    private void scrollToFirstRow() {
+        pageScroll = null;
+        scrollOffsets[activeMode] = 0;
+    }
+
+    private void restoreScroll(ScrollView scroll) {
+        pageScroll = scroll;
+        int offset = scrollOffsets[activeMode];
+        if (offset > 0) androidx.core.view.OneShotPreDrawListener.add(scroll, () -> scroll.scrollTo(0, offset));
+    }
 
     // --- 文件浏览器状态 ---
     private String projectRoot = "";
@@ -109,6 +152,7 @@ final class NativeFiles {
     private boolean autoStartTerm = true;
 
     private String projectId;
+    private boolean resolvingProject;
     private String pageError = "";
     private boolean notRepo;
     private final java.util.LinkedHashSet<String> gitSelection = new java.util.LinkedHashSet<>();
@@ -123,6 +167,7 @@ final class NativeFiles {
     private final ArrayList<String> roots = new ArrayList<>();
 
     void leave() {
+        savePosition();
         if (pendingResize != null) handler.removeCallbacks(pendingResize);
         pendingResize = null;
         disconnectTerm();
@@ -133,13 +178,16 @@ final class NativeFiles {
 
     void show(NativeHome h, String id) {
         lastGeneration = h.generation;
-        activeMode = "editor".equals(id) ? MODE_EDITOR : "git".equals(id) ? MODE_GIT
-                : "terminal".equals(id) ? MODE_TERM : MODE_FILES;
+        activeMode = ROUTES.indexOf(id);
         pageError = "";
+        resolvingProject = false;
         if (!h.projectId.equals(projectId)) {
             String target = h.projectId;
             if (!target.isEmpty()) {
+                resolvingProject = true;
+                render(h);
                 read(h, "/api/projects", resp -> {
+                    resolvingProject = false;
                     JSONArray list = resp.optJSONArray("projects");
                     for (int i = 0; list != null && i < list.length(); i++) {
                         JSONObject p = list.optJSONObject(i);
@@ -161,6 +209,9 @@ final class NativeFiles {
 
     private void setProject(String id, String dir) {
         projectId = id;
+        loadedFileQuery = loadedGitDir = null;
+        commitDraft = "";
+        Arrays.fill(scrollOffsets, 0);
         currentDir = projectRoot = dir;
         gitSelection.clear();
         fileList.clear();
@@ -181,41 +232,51 @@ final class NativeFiles {
             if (h.generation == generation && lastGeneration == generation) callback.accept(response);
         }, error -> {
             if (h.generation != generation || lastGeneration != generation) return;
-            filesLoading = gitLoading = termLoading = false;
+            filesLoading = gitLoading = termLoading = resolvingProject = false;
             pageError = error;
             render(h);
         });
     }
 
     private void render(NativeHome h) {
-        h.body.removeAllViews();
-
-        // 顶部模式导航栏
-        LinearLayout navBar = new LinearLayout(h.a);
-        navBar.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams navParams = new LinearLayout.LayoutParams(-1, -2);
-        navParams.setMargins(h.dp(16), h.dp(4), h.dp(16), h.dp(6));
-        navBar.setLayoutParams(navParams);
-        navBar.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 28));
-        int navPad = h.dp(4);
-        navBar.setPadding(navPad, navPad, navPad, navPad);
-
-        makeTabButton(h, navBar, "文件", activeMode == MODE_FILES, () -> h.nav("files"));
-        makeTabButton(h, navBar, isModified ? "编辑器 *" : "编辑器", activeMode == MODE_EDITOR, () -> h.nav("editor"));
-        makeTabButton(h, navBar, "Git", activeMode == MODE_GIT, () -> h.nav("git"));
-        makeTabButton(h, navBar, "终端", activeMode == MODE_TERM, () -> h.nav("terminal"));
-        if (activeMode == MODE_TERM && pageError.isEmpty()) {
-            NativeTerminalLayout panel = new NativeTerminalLayout(h.a);
-            h.body.addView(panel, new LinearLayout.LayoutParams(-1, -1));
-            panel.addView(navBar);
-            renderTermView(h, panel, navBar);
+        savePosition();
+        boolean attached = ownsBody(h.body);
+        if (!attached) {
+            workspace = new NativeTerminalLayout(h.a);
+            h.body.addView(workspace, new LinearLayout.LayoutParams(-1, -1));
+            modes = new PixelSegmentedTabs(h.a, true, index -> h.nav(ROUTES.get(index)));
+            LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-1,-2);
+            bounds.setMargins(h.dp(16), h.dp(4), h.dp(16), h.dp(6));
+            workspace.addView(modes.view, bounds);
+            content = new LinearLayout(h.a);
+            content.setOrientation(LinearLayout.VERTICAL);
+            workspace.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
+            renderedMode = -1;
+        }
+        modes.labels(Arrays.asList("文件", isModified ? "编辑器 *" : "编辑器", "Git", "终端"));
+        boolean animate = attached && !h.committingBackGesture();
+        modes.select(activeMode, animate);
+        if (renderedMode != activeMode) {
+            PixelSegmentedTabs.slideContent(content, animate && renderedMode >= 0 ? activeMode - renderedMode : 0);
+        }
+        boolean keepSessions = !resolvingProject && activeMode == MODE_TERM && pageError.isEmpty() && terminalHeader != null
+                && terminalHeader.getParent() == content;
+        int first = keepSessions ? 2 : 0;
+        workspace.clearBinding();
+        content.removeViews(first, content.getChildCount() - first);
+        if (!keepSessions) terminalHeader = null;
+        renderedMode = activeMode;
+        if (resolvingProject) {
+            renderLoading(h, content, "正在读取项目目录…");
             return;
         }
-        h.body.addView(navBar);
-
+        if (activeMode == MODE_TERM && pageError.isEmpty()) {
+            renderTermView(h);
+            return;
+        }
         if (!pageError.isEmpty()) {
-            h.text(h.body, pageError);
-            h.button(h.body, "重试", () -> show(h, h.screen));
+            h.text(content, pageError);
+            h.button(content, "重试", () -> show(h, h.screen));
             return;
         }
 
@@ -241,7 +302,7 @@ final class NativeFiles {
         int m16 = h.dp(16);
         int pad12 = h.dp(12);
 
-        LinearLayout headerGroup = PixelUi.group(h.body);
+        LinearLayout headerGroup = PixelUi.group(content);
         LinearLayout.LayoutParams hgLp = (LinearLayout.LayoutParams) headerGroup.getLayoutParams();
         hgLp.setMargins(m16, m16, m16, h.dp(8));
         headerGroup.setLayoutParams(hgLp);
@@ -318,10 +379,10 @@ final class NativeFiles {
                         return true;
                     case 4:
                         String[] paths = roots.toArray(new String[0]);
-                        new MaterialAlertDialogBuilder(h.a).setTitle("选择位置").setItems(paths, (dialog, index) -> {
+                        PixelChoiceSheet.show(h.a, "选择位置", Arrays.asList(paths), Arrays.asList(paths).indexOf(currentDir), index -> {
                             currentDir = paths[index];
                             loadFiles(h);
-                        }).setNegativeButton("取消", null).show();
+                        }, null);
                         return true;
                     case 5:
                         LinearLayout box = new LinearLayout(h.a);
@@ -331,13 +392,15 @@ final class NativeFiles {
                         filter.setSingleLine(true);
                         filter.setHint("文件名");
                         filter.setText(search);
-                        CheckBox hidden = new CheckBox(h.a);
+                        CheckBox hidden = PixelChoiceField.checkbox(h.a);
                         hidden.setText("显示隐藏文件");
                         hidden.setChecked(showHidden);
                         box.addView(filter);
                         box.addView(hidden);
                         new MaterialAlertDialogBuilder(h.a).setTitle("筛选文件").setView(box)
                                 .setPositiveButton("应用", (d, w) -> {
+                                    scrollToFirstRow();
+                                    filePage = 0;
                                     search = filter.getText().toString();
                                     showHidden = hidden.isChecked();
                                     loadFiles(h);
@@ -363,8 +426,8 @@ final class NativeFiles {
         });
         headerGroup.addView(overflowBtn);
 
-        if (filesLoading) {
-            renderLoading(h, h.body, "正在读取目录列表...");
+        if (filesLoading && !fileQuery().equals(loadedFileQuery)) {
+            renderLoading(h, content, "正在读取目录列表...");
             return;
         }
 
@@ -400,7 +463,7 @@ final class NativeFiles {
                 itemGroup.setPadding(h.dp(8), h.dp(8), h.dp(8), h.dp(8));
 
                 if (selecting) {
-                    CheckBox selected = new CheckBox(h.a);
+                    CheckBox selected = PixelChoiceField.checkbox(h.a);
                     selected.setContentDescription("选择 " + item.name);
                     selected.setChecked(selectedFiles.contains(item.path));
                     itemGroup.setTag(selected);
@@ -463,6 +526,7 @@ final class NativeFiles {
         }
 
         pager(h, listLayout, fileList.size(), filePage, page -> {
+            scrollToFirstRow();
             filePage = page;
             render(h);
         });
@@ -472,7 +536,8 @@ final class NativeFiles {
         }
 
         sv.addView(listLayout);
-        h.body.addView(sv);
+        restoreScroll(sv);
+        content.addView(sv);
     }
 
     private void showItemMenu(NativeHome h, View anchor, FileItem item) {
@@ -492,11 +557,22 @@ final class NativeFiles {
         menu.show();
     }
 
+    private String fileQuery() {
+        return "?path=" + Uri.encode(currentDir) + "&q=" + Uri.encode(search) + "&hidden=" + (showHidden ? "1" : "0");
+    }
+
     private void loadFiles(NativeHome h) {
+        savePosition();
+        if (!selectionDir.equals(currentDir)) {
+            scrollOffsets[MODE_FILES] = 0;
+            filePage = 0;
+            selecting = false;
+            selectedFiles.clear();
+            selectionDir = currentDir;
+        }
         filesLoading = true;
         render(h);
-        if (!selectionDir.equals(currentDir)) { filePage = 0; selecting = false; selectedFiles.clear(); selectionDir = currentDir; }
-        String q = "?path=" + Uri.encode(currentDir) + "&q=" + Uri.encode(search) + "&hidden=" + (showHidden ? "1" : "0");
+        String q = fileQuery();
         final int request = ++fileRequest;
         read(h, "/api/files" + q, resp -> {
             if (request != fileRequest) return;
@@ -509,6 +585,8 @@ final class NativeFiles {
                     return;
                 }
                 currentDir = resp.optString("path", currentDir);
+                selectionDir = currentDir;
+                loadedFileQuery = fileQuery();
                 truncated = resp.optBoolean("truncated");
                 if (projectRoot.isEmpty()) projectRoot = currentDir;
                 roots.clear();
@@ -605,6 +683,8 @@ final class NativeFiles {
         if (saving) { h.notice("正在保存"); return; }
         if (path.equals(editingPath) && !editorLoading) { h.nav("editor"); return; }
         Runnable open = () -> {
+            caretStart = caretEnd = scrollOffsets[MODE_EDITOR] = 0;
+            editorFocused = false;
             editingPath = path;
             editingText = "";
             editingBmp = null;
@@ -638,7 +718,7 @@ final class NativeFiles {
                 h.nav("files");
             });
             emptyBox.addView(goFiles);
-            h.body.addView(emptyBox);
+            content.addView(emptyBox);
             return;
         }
 
@@ -688,11 +768,11 @@ final class NativeFiles {
         });
         closeBtn.setEnabled(!saving);
         bar.addView(closeBtn);
-        h.body.addView(bar);
-        addDivider(h, h.body);
+        content.addView(bar);
+        addDivider(h, content);
 
         if (editorLoading) {
-            renderLoading(h, h.body, "正在加载文件内容...");
+            renderLoading(h, content, "正在加载文件内容...");
             return;
         }
 
@@ -723,7 +803,8 @@ final class NativeFiles {
                 imgBox.addView(errTv);
             }
             imgScroll.addView(imgBox);
-            h.body.addView(imgScroll);
+            restoreScroll(imgScroll);
+            content.addView(imgScroll);
         } else {
             // 原生文本编辑区：加权滚动布局
             ScrollView editScroll = new ScrollView(h.a);
@@ -759,12 +840,18 @@ final class NativeFiles {
                     if (!isModified) {
                         isModified = true;
                         titleTv.setText(basename(editingPath) + " *");
+                        modes.labels(Arrays.asList("文件", "编辑器 *", "Git", "终端"));
+                        modes.select(MODE_EDITOR, true);
                     }
                 }
             });
 
+            editingView = editor;
+            editor.setSelection(Math.min(caretStart, editor.length()), Math.min(caretEnd, editor.length()));
+            if (editorFocused) editor.requestFocus();
+            restoreScroll(editScroll);
             editScroll.addView(editor);
-            h.body.addView(editScroll);
+            content.addView(editScroll);
 
             LinearLayout bottomInfo = new LinearLayout(h.a);
             bottomInfo.setOrientation(LinearLayout.HORIZONTAL);
@@ -773,7 +860,7 @@ final class NativeFiles {
             charCount.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
             charCount.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
             bottomInfo.addView(charCount);
-            h.body.addView(bottomInfo);
+            content.addView(bottomInfo);
         }
     }
 
@@ -910,17 +997,17 @@ final class NativeFiles {
         actRow.addView(PixelUi.icon(h.a, "refresh", "刷新 Git 状态", () -> loadGit(h)));
         header.addView(actRow);
 
-        h.body.addView(header);
-        addDivider(h, h.body);
+        content.addView(header);
+        addDivider(h, content);
 
-        if (gitLoading) {
-            renderLoading(h, h.body, "正在读取 Git 仓库状态...");
+        if (gitLoading && !currentDir.equals(loadedGitDir)) {
+            renderLoading(h, content, "正在读取 Git 仓库状态...");
             return;
         }
 
         if (notRepo) {
-            h.text(h.body, "当前目录没有 Git 仓库。");
-            h.button(h.body, "初始化 Git 仓库", () -> h.post("/api/git/init", NativeHome.json("dir", currentDir), r -> loadGit(h)));
+            h.text(content, "当前目录没有 Git 仓库。");
+            h.button(content, "初始化 Git 仓库", () -> h.post("/api/git/init", NativeHome.json("dir", currentDir), r -> loadGit(h)));
             return;
         }
         // 提交区（有改动时展示）
@@ -931,6 +1018,8 @@ final class NativeFiles {
             commitBox.setPadding(pad, h.dp(4), pad, h.dp(4));
 
             final EditText msgInput = new EditText(h.a);
+            gitMessageView = msgInput;
+            msgInput.setText(commitDraft);
             msgInput.setHint("输入本次提交说明...");
             msgInput.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
             msgInput.setSingleLine(true);
@@ -949,6 +1038,7 @@ final class NativeFiles {
                         .setPositiveButton("确定提交", (d, w) -> {
                             NativeGitActions.write(h, "commit", NativeHome.json("message", msg, "files", new JSONArray(gitSelection), "dir", currentDir), resp -> {
                                 gitSelection.clear();
+                                msgInput.setText("");
                                 h.notice("提交成功: " + resp.optString("hash", ""));
                                 loadGit(h);
                             });
@@ -957,8 +1047,8 @@ final class NativeFiles {
                         .show();
             });
             commitBox.addView(commitBtn);
-            h.body.addView(commitBox);
-            addDivider(h, h.body);
+            content.addView(commitBox);
+            addDivider(h, content);
         }
 
         ScrollView sv = new ScrollView(h.a);
@@ -983,7 +1073,7 @@ final class NativeFiles {
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setPadding(pad, pad, pad, pad);
 
-                CheckBox selected = new CheckBox(h.a);
+                CheckBox selected = PixelChoiceField.checkbox(h.a);
                 selected.setContentDescription("提交 " + gf.path);
                 selected.setChecked(gitSelection.contains(gf.path));
                 selected.setOnCheckedChangeListener((box, checked) -> {
@@ -1012,18 +1102,29 @@ final class NativeFiles {
                 addDivider(h, filesLayout);
             }
         }
-        pager(h, filesLayout, gitFiles.size(), gitPage, page -> { gitPage = page; render(h); });
+        pager(h, filesLayout, gitFiles.size(), gitPage, page -> {
+            scrollToFirstRow();
+            gitPage = page;
+            render(h);
+        });
         sv.addView(filesLayout);
-        h.body.addView(sv);
+        restoreScroll(sv);
+        content.addView(sv);
     }
 
     private void loadGit(NativeHome h) {
+        if (loadedGitDir != null && !currentDir.equals(loadedGitDir)) {
+            commitDraft = "";
+            gitSelection.clear();
+            scrollOffsets[MODE_GIT] = 0;
+        }
         gitLoading = true;
         render(h);
         read(h, "/api/git/status?dir=" + Uri.encode(currentDir), resp -> {
             notRepo = resp.optBoolean("notRepo");
             if (resp.has("error") && !notRepo) pageError = resp.optString("error");
             gitLoading = false;
+            loadedGitDir = currentDir;
             gitFiles.clear();
             if (resp != null) {
                 gitBranch = resp.optString("branch", "");
@@ -1057,7 +1158,7 @@ final class NativeFiles {
         bInput.setHint("分支名称");
         box.addView(bInput);
 
-        final CheckBox cb = new CheckBox(h.a);
+        final CheckBox cb = PixelChoiceField.checkbox(h.a);
         cb.setText("若分支不存在则新建 (-c)");
         box.addView(cb);
 
@@ -1127,36 +1228,24 @@ final class NativeFiles {
     // 4. 原生终端面板 (PTY 会话 / SSE 回放与流 / 虚拟控制键 / 输入)
     // =========================================================================
 
-    private void renderTermView(NativeHome h, NativeTerminalLayout panel, View navBar) {
+    private void buildTerminalHeader(NativeHome h) {
         LinearLayout topBar = new LinearLayout(h.a);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
         int pad = h.dp(4);
-        topBar.setPadding(pad, pad, pad, pad);
+        topBar.setPadding(pad, 0, pad, 0);
 
         HorizontalScrollView sessionScroll = new HorizontalScrollView(h.a);
         sessionScroll.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        LinearLayout sessionBox = new LinearLayout(h.a);
-        sessionBox.setOrientation(LinearLayout.HORIZONTAL);
-
-        for (TermSession ts : termSessions) {
-            String title = (ts.title.isEmpty() ? ts.id : ts.title) + (ts.alive ? "" : " (已退出)");
-            Button sBtn = makeSmallBtn(h, title, () -> {
-                if (!ts.id.equals(activeTermId)) {
-                    connectTerm(h, ts.id);
-                }
-            });
-            if (ts.id.equals(activeTermId)) {
-                sBtn.setTypeface(Typeface.DEFAULT_BOLD);
-            }
-            sessionBox.addView(sBtn);
-        }
-        sessionScroll.addView(sessionBox);
+        sessions = new PixelSegmentedTabs(h.a, false, i -> {
+            if (i < termSessions.size()) connectTerm(h, termSessions.get(i).id);
+        });
+        sessionScroll.setHorizontalScrollBarEnabled(false);
+        sessionScroll.addView(sessions.view);
         topBar.addView(sessionScroll);
 
-        ImageButton newTermBtn = PixelUi.icon(h.a, "add", "新建终端", () -> createTerm(h));
-        newTermBtn.setEnabled(termAvailable && !termLoading && !creatingTerm);
-        topBar.addView(newTermBtn);
+        newTermButton = PixelUi.icon(h.a, "add", "新建终端", () -> createTerm(h));
+        topBar.addView(newTermButton);
 
         Runnable closeTerm = () -> {
             if (activeTermId == null) return;
@@ -1190,20 +1279,34 @@ final class NativeFiles {
         });
         topBar.addView(more);
 
-        panel.addView(topBar);
-        View divider = addDivider(h, panel);
+        terminalHeader = topBar;
+        content.addView(topBar);
+        terminalDivider = addDivider(h, content);
+    }
+
+    private void renderTermView(NativeHome h) {
+        if (terminalHeader == null) buildTerminalHeader(h);
+        List<String> labels = new ArrayList<>();
+        int selected = -1;
+        for (TermSession term : termSessions) {
+            if (term.id.equals(activeTermId)) selected = labels.size();
+            labels.add((term.title.isEmpty() ? term.id : term.title) + (term.alive ? "" : " (已退出)"));
+        }
+        sessions.labels(labels);
+        sessions.select(selected, true);
+        newTermButton.setEnabled(termAvailable && !termLoading && !creatingTerm);
 
         if (termLoading) {
-            renderLoading(h, panel, "正在同步终端会话...");
+            renderLoading(h, content, "正在同步终端会话...");
             return;
         }
 
         if (!termAvailable && termSessions.isEmpty()) {
-            h.text(panel, "当前运行环境没有可用的终端组件。");
+            h.text(content, "当前运行环境没有可用的终端组件。");
             return;
         }
         if (activeTermId == null) {
-            h.button(panel, "新建终端", () -> createTerm(h));
+            h.button(content, "新建终端", () -> createTerm(h));
             return;
         }
         final String sessionId = activeTermId;
@@ -1232,10 +1335,10 @@ final class NativeFiles {
             termCols = cols; termRows = rows;
             scheduleTermResize(h);
         });
-        panel.addView(termScrollView);
+        content.addView(termScrollView);
 
-        View keys = TerminalControls.add(panel, input);
-        panel.bind(navBar, topBar, divider, termScrollView, termTextView, keys);
+        View keys = TerminalControls.add(content, input);
+        workspace.bind(modes.view, terminalHeader, terminalDivider, termScrollView, termTextView, keys);
     }
 
     private void createTerm(NativeHome h) {
@@ -1316,6 +1419,7 @@ final class NativeFiles {
     }
 
     private void connectTerm(NativeHome h, String termId) {
+        boolean restoreFocus = termTextView != null && termTextView.hasFocus();
         disconnectTerm();
         if (!termId.equals(activeTermId)) {
             termOutput.reset();
@@ -1324,6 +1428,11 @@ final class NativeFiles {
         }
         activeTermId = termId;
         render(h);
+        if (restoreFocus && termTextView != null) {
+            termTextView.requestFocus();
+            android.view.inputmethod.InputMethodManager ime = h.a.getSystemService(android.view.inputmethod.InputMethodManager.class);
+            if (ime != null) ime.restartInput(termTextView);
+        }
         scheduleTermResize(h);
         streamTerm(h, termId);
     }
@@ -1516,21 +1625,6 @@ final class NativeFiles {
         line.setBackgroundColor(PixelUi.color(h.a, "outlineVariant"));
         parent.addView(line);
         return line;
-    }
-
-    private static Button makeTabButton(NativeHome h, LinearLayout parent, String title, boolean active, Runnable act) {
-        String bgRole = active ? "secondaryContainer" : null;
-        String fgRole = active ? "onSecondaryContainer" : "onSurfaceVariant";
-        Button b = createPixelBtn(h, title, bgRole, fgRole, 24, 4, 4, 14, 0, act);
-        b.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        b.setSelected(active);
-        b.setMaxLines(1);
-        b.setEllipsize(TextUtils.TruncateAt.END);
-        if (active) {
-            b.setTypeface(Typeface.DEFAULT_BOLD);
-        }
-        parent.addView(b);
-        return b;
     }
 
     private static Button makeBtn(NativeHome h, String title, Runnable act) {

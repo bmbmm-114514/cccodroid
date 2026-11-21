@@ -382,6 +382,10 @@ public class MainActivity extends Activity {
             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
     /** 界面里选的外观：theme.js 每次定下来都经 CCApp.themePref 存一份；没存过（第一次装）= 跟随系统 */
+    private android.widget.CheckBox choiceCheckbox() {
+        return NativeAppearance.nativeMode(this) ? PixelChoiceField.checkbox(this) : new android.widget.CheckBox(this);
+    }
+
     private boolean uiDark() { return NativeAppearance.nativeMode(this) ? systemNight() : BrowserPane.night(this); }
     /** 安卓 13+：下一次启动的启动画面按界面里选的外观上色（选「跟随系统」就交还系统）。系统记住这个选择，进程没起来时也生效 */
     private void syncSplash() {
@@ -564,7 +568,7 @@ public class MainActivity extends Activity {
                 : cmd + "\n\n" + Tr.t("它会以 Shizuku（shell）身份运行，能装卸应用、改权限或系统设置。不认识这条命令就拒绝。")))
             .setNegativeButton(Tr.t("拒绝"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
         // 这个会话后面的都允许（Claude 发来的才有）：勾上再点「允许」。只在内存里，应用重启就失效
-        final android.widget.CheckBox all = sess && !clip ? new android.widget.CheckBox(this) : null;
+        final android.widget.CheckBox all = sess && !clip ? choiceCheckbox() : null;
         if (all != null) {
             all.setText(Tr.t("这个会话后面的特权命令都允许，不再逐条问（应用重启后失效）"));
             int pad = (int) (20 * getResources().getDisplayMetrics().density);
@@ -1083,7 +1087,7 @@ public class MainActivity extends Activity {
                 if (m == null || "shared".equals(m.optString("kind"))) continue;
                 String id = m.optString("id");
                 boolean req = m.optBoolean("required");
-                android.widget.CheckBox cb = new android.widget.CheckBox(this);
+                android.widget.CheckBox cb = choiceCheckbox();
                 org.json.JSONObject d = m.optJSONObject("desc");
                 String desc = d == null ? "" : d.optString(Tr.lang().startsWith("zh") ? "zh" : "en", d.optString("zh"));
                 cb.setText(Installer.moduleName(m) + (req ? "  · " + Tr.t("必装") : "") + "  · " + Tr.f("约 {0} MB", String.valueOf(m.optLong("installed") >> 20)) + "\n" + desc);
@@ -2322,7 +2326,7 @@ public class MainActivity extends Activity {
     /** 原生确认框：说清会挪走什么、留什么、留底在哪；勾上才连厂商配置和密钥一起挪。按钮一秒后才能点（guard） */
     void askFactoryReset() {
         if (resetting || isFinishing()) return;
-        android.widget.CheckBox keys = new android.widget.CheckBox(this);
+        android.widget.CheckBox keys = choiceCheckbox();
         keys.setText(Tr.t("同时清除厂商配置和密钥（恢复后要重新填）"));
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
         android.widget.FrameLayout box = new android.widget.FrameLayout(this);

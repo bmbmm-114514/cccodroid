@@ -122,7 +122,7 @@ public class NativeReferencePanel {
         countTv.setTextSize(13);
         countTv.setPadding(0, h.dp(4), 0, h.dp(4));
 
-        Spinner spinner = new Spinner(h.a);
+        Spinner spinner = new PixelChoiceField(h.a, isHelp ? "选择章节" : "选择版本");
         root.addView(spinner);
 
         LinearLayout stepRow = new LinearLayout(h.a);
@@ -132,7 +132,7 @@ public class NativeReferencePanel {
         LinearLayout detail = PixelUi.group(root);
         detail.setPadding(h.dp(16), h.dp(16), h.dp(16), h.dp(16));
 
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, new ArrayList<>());
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_item, new ArrayList<>());
         spinner.setAdapter(adapter);
         final boolean[] updating = new boolean[]{false};
 

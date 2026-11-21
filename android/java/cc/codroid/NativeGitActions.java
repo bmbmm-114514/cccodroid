@@ -5,6 +5,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.widget.*;
 import org.json.*;
 import java.io.*;
+import java.util.Arrays;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
@@ -21,21 +22,20 @@ public class NativeGitActions {
     public static void add(NativeHome h, LinearLayout parent, String dir, Runnable refresh) {
         parent.addView(PixelUi.icon(h.a, "more", "更多 Git 操作", () -> {
             String[] items = {"提交日志", "拉取 (Pull)", "推送 (Push)", "抓取 (Fetch)", "设置身份"};
-            new MaterialAlertDialogBuilder(h.a).setTitle("Git 操作")
-                .setItems(items, (di, which) -> {
-                    if (which == 0) showLog(h, dir);
-                    else if (which >= 1 && which <= 3) {
-                        String op = which == 1 ? "pull" : (which == 2 ? "push" : "fetch");
-                        String title = items[which];
-                        new MaterialAlertDialogBuilder(h.a).setTitle("确认" + title)
-                            .setMessage("确定要执行 " + title + " 吗？")
-                            .setPositiveButton("确定", (d, w) -> write(h, op, NativeHome.json("dir", dir), res -> {
-                                h.notice(title + " 成功");
-                                if (which == 1 && refresh != null) refresh.run();
-                            }))
-                            .setNegativeButton("取消", null).show();
-                    } else if (which == 4) showIdentity(h, dir);
-                }).show();
+            PixelChoiceSheet.actions(h.a, "Git 操作", Arrays.asList(items), which -> {
+                if (which == 0) showLog(h, dir);
+                else if (which >= 1 && which <= 3) {
+                    String op = which == 1 ? "pull" : (which == 2 ? "push" : "fetch");
+                    String title = items[which];
+                    new MaterialAlertDialogBuilder(h.a).setTitle("确认" + title)
+                        .setMessage("确定要执行 " + title + " 吗？")
+                        .setPositiveButton("确定", (d, w) -> write(h, op, NativeHome.json("dir", dir), res -> {
+                            h.notice(title + " 成功");
+                            if (which == 1 && refresh != null) refresh.run();
+                        }))
+                        .setNegativeButton("取消", null).show();
+                } else if (which == 4) showIdentity(h, dir);
+            });
         }));
     }
 
@@ -49,9 +49,8 @@ public class NativeGitActions {
                 JSONObject c = commits.optJSONObject(i);
                 list[i] = c.optString("short") + " " + c.optString("subject") + " (" + c.optString("author") + ")";
             }
-            new MaterialAlertDialogBuilder(h.a).setTitle("提交日志")
-                .setItems(list, (d, w) -> showCommit(h, dir, commits.optJSONObject(w).optString("hash")))
-                .setNegativeButton("取消", null).show();
+            PixelChoiceSheet.actions(h.a, "提交日志", Arrays.asList(list),
+                    w -> showCommit(h, dir, commits.optJSONObject(w).optString("hash")));
         }));
     }
 
@@ -63,10 +62,8 @@ public class NativeGitActions {
             int len = files != null ? files.length() : 0;
             String[] list = new String[len];
             for (int i = 0; i < len; i++) list[i] = files.optJSONObject(i).optString("path");
-            new MaterialAlertDialogBuilder(h.a)
-                .setTitle(msg.trim().isEmpty() ? hash : msg.trim())
-                .setItems(list, (d, w) -> showDiff(h, dir, hash, list[w]))
-                .setNegativeButton("返回", null).show();
+            PixelChoiceSheet.actions(h.a, msg.trim().isEmpty() ? hash : msg.trim(), Arrays.asList(list),
+                    w -> showDiff(h, dir, hash, list[w]));
         }));
     }
 

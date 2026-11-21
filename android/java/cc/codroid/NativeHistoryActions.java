@@ -12,7 +12,6 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -23,48 +22,15 @@ import java.net.URLEncoder;
 
 public class NativeHistoryActions {
 
-    public static void show(NativeHome h, View anchor) {
+    public static void show(NativeHome h) {
         if (h == null || h.a == null) return;
-        if (anchor != null) {
-            PopupMenu menu = new PopupMenu(h.a, anchor);
-            menu.getMenu().add(0, 1, 0, "搜索 Claude 历史");
-            menu.getMenu().add(0, 2, 0, "导出所有 Claude 会话");
-            menu.getMenu().add(0, 3, 0, "从文件导入 Claude 会话");
-            menu.getMenu().add(0, 4, 0, "查看回收站与恢复");
-            menu.setOnMenuItemClickListener(item -> {
-                int itemId = item.getItemId();
-                if (itemId == 1) {
-                    searchHistory(h);
-                    return true;
-                } else if (itemId == 2) {
-                    exportAllSessions(h);
-                    return true;
-                } else if (itemId == 3) {
-                    h.a.pickNativeHistory();
-                    return true;
-                } else if (itemId == 4) {
-                    viewTrashAndRestore(h);
-                    return true;
-                }
-                return false;
-            });
-            menu.show();
-        } else {
-            String[] options = new String[]{"搜索 Claude 历史", "导出所有 Claude 会话", "从文件导入 Claude 会话", "查看回收站与恢复"};
-            new MaterialAlertDialogBuilder(h.a)
-                .setItems(options, (dialog, which) -> {
-                    if (which == 0) {
-                        searchHistory(h);
-                    } else if (which == 1) {
-                        exportAllSessions(h);
-                    } else if (which == 2) {
-                        h.a.pickNativeHistory();
-                    } else if (which == 3) {
-                        viewTrashAndRestore(h);
-                    }
-                })
-                .show();
-        }
+        String[] options = {"搜索 Claude 历史", "导出所有 Claude 会话", "从文件导入 Claude 会话", "查看回收站与恢复"};
+        PixelChoiceSheet.actions(h.a, "历史会话", java.util.Arrays.asList(options), which -> {
+            if (which == 0) searchHistory(h);
+            else if (which == 1) exportAllSessions(h);
+            else if (which == 2) h.a.pickNativeHistory();
+            else viewTrashAndRestore(h);
+        });
     }
 
     public static void legacy(NativeHome h, LinearLayout parent, JSONObject item) {
@@ -77,9 +43,7 @@ public class NativeHistoryActions {
         final String finalTitle = title;
         Runnable more = () -> {
             String[] options = new String[]{"导出此会话", "移至回收站"};
-            new MaterialAlertDialogBuilder(h.a)
-                .setTitle(finalTitle)
-                .setItems(options, (dialog, which) -> {
+            PixelChoiceSheet.actions(h.a, finalTitle, java.util.Arrays.asList(options), which -> {
                     if (which == 0) {
                         JSONArray ids = new JSONArray();
                         ids.put(id);
@@ -113,8 +77,7 @@ public class NativeHistoryActions {
                             });
                         });
                     }
-                })
-                .show();
+                });
         };
         parent.addView(sessionRow(h,title,"Claude Code", () -> h.openSession("claude:"+id),more));
     }
@@ -390,9 +353,7 @@ public class NativeHistoryActions {
                 final String itemTitle = title;
                 card.setOnClickListener(v -> {
                     String[] actions = new String[]{"恢复此会话", "彻底删除"};
-                    new MaterialAlertDialogBuilder(h.a)
-                        .setTitle(itemTitle)
-                        .setItems(actions, (itemDlg, which) -> {
+                    PixelChoiceSheet.actions(h.a, itemTitle, java.util.Arrays.asList(actions), which -> {
                             if (which == 0) {
                                 JSONArray ids = new JSONArray();
                                 ids.put(id);
@@ -421,8 +382,7 @@ public class NativeHistoryActions {
                                     });
                                 });
                             }
-                        })
-                        .show();
+                        });
                 });
 
                 listLayout.addView(card);

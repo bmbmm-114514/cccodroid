@@ -36,14 +36,9 @@ public class NativeSettingsPanel {
             .setPositiveButton("确定", (d, w) -> onOk.run()).setNegativeButton("取消", null).show();
     }
 
-    private static Switch addSwitch(LinearLayout p, String label, boolean checked) {
-        Switch s = new Switch(p.getContext());
-        s.setText(label);
+    private static MaterialSwitch addSwitch(LinearLayout p, String label, boolean checked) {
+        MaterialSwitch s = NativeStatusViews.toggle(p, label);
         s.setChecked(checked);
-        s.setTextSize(16);
-        s.setTextColor(PixelUi.color(p.getContext(), "onSurface"));
-        s.setMinHeight(Math.round(60 * p.getResources().getDisplayMetrics().density));
-        p.addView(s, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return s;
     }
 
@@ -83,7 +78,7 @@ public class NativeSettingsPanel {
     }
 
     private static void showClaude(NativeHome h, LinearLayout v) {
-        Switch swIdle = addSwitch(v, "空闲时自动压缩上下文", false);
+        MaterialSwitch swIdle = addSwitch(v, "空闲时自动压缩上下文", false);
         h.text(v, "自动压缩窗口（留空使用默认值）");
         EditText etWin = addInput(v, "例如: 20000", false); etWin.setInputType(InputType.TYPE_CLASS_NUMBER);
         h.text(v, "允许的工具");
@@ -111,9 +106,9 @@ public class NativeSettingsPanel {
     }
 
     private static void showRun(NativeHome h, LinearLayout v) {
-        Switch swIsland = addSwitch(v, "工作岛后台保活", false);
+        MaterialSwitch swIsland = addSwitch(v, "工作岛后台保活", false);
         swIsland.setOnClickListener(v1 -> h.post("/api/settings", NativeHome.json("workIsland", swIsland.isChecked()), res -> h.notice("工作岛设置已更新")));
-        Switch swMem = addSwitch(v, "内存管家", false);
+        MaterialSwitch swMem = addSwitch(v, "内存管家", false);
         h.text(v, "内存保护白名单包名 (换行或逗号分隔):");
         EditText etWl = addInput(v, "例如: com.tencent.mm", true);
         swMem.setOnClickListener(v1 -> {
@@ -166,7 +161,7 @@ public class NativeSettingsPanel {
         });
     }
 
-    private static void pollStorage(NativeHome h, TextView tvInfo, Switch swAuto, Spinner spEvery) {
+    private static void pollStorage(NativeHome h, TextView tvInfo, MaterialSwitch swAuto, Spinner spEvery) {
         int gen = h.generation;
         h.get("/api/storage", r -> {
             if (r == null || h.generation != gen) return;
@@ -198,11 +193,11 @@ public class NativeSettingsPanel {
     private static void showStorage(NativeHome h, LinearLayout v) {
         h.text(v, "存储管理与清理");
         TextView tvInfo = h.text(v, "正在读取存储状态...");
-        Switch swAuto = addSwitch(v, "自动清理", true);
+        MaterialSwitch swAuto = addSwitch(v, "自动清理", true);
         h.text(v, "自动清理频次:");
-        Spinner spEvery = new Spinner(h.a);
+        Spinner spEvery = new PixelChoiceField(h.a, "自动清理频次");
         String[] evKeys = {"day", "week", "month"};
-        spEvery.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, new String[]{"每天", "每周", "每月"}));
+        spEvery.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_item, new String[]{"每天", "每周", "每月"}));
         v.addView(spEvery, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         swAuto.setOnClickListener(v1 -> h.post("/api/settings", NativeHome.json("autoClean", NativeHome.json("enabled", swAuto.isChecked())), res -> h.notice("自动清理已更新")));
         h.button(v, "保存清理频次", () -> h.post("/api/settings", NativeHome.json("autoClean",

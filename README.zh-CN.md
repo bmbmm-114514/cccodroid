@@ -15,7 +15,7 @@
 
 原生终端里，点输出区即可直接输入。底部有两排快捷键，可补全、移动光标和翻页。点一下 Ctrl 或 Alt，再输入下一个键即可使用组合键。例如先点 Ctrl 再输入 C 可中断当前命令。
 
-测试版 0.4.4 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
+测试版 0.4.5 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
 
 下文保留上游 cccodroid 的介绍与原版下载链接。
 
