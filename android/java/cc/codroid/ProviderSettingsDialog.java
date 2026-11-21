@@ -16,14 +16,20 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
-import android.widget.Spinner;
+import android.app.Dialog;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
+import android.view.Window;
+import android.view.WindowManager;
+import android.widget.RadioButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -79,11 +85,11 @@ public final class ProviderSettingsDialog {
         }
     }
 
-    private static class SpinnerOption {
+    private static class Choice {
         final String id;
         final String label;
 
-        SpinnerOption(String id, String label) {
+        Choice(String id, String label) {
             this.id = id;
             this.label = label;
         }
@@ -95,6 +101,7 @@ public final class ProviderSettingsDialog {
     }
 
     private final Activity host;
+    private final Context ui;
     private final Runnable onChanged;
     private final float density;
 
@@ -119,11 +126,9 @@ public final class ProviderSettingsDialog {
         return isDismissed || host.isFinishing() || host.isDestroyed() || gen != generation;
     }
 
-    private boolean isBindingModel = false;
-    private boolean isBindingEffort = false;
-    private boolean isBindingTier = false;
-
-    private AlertDialog dialog;
+    private Dialog dialog;
+    private LinearLayout officialGroup;
+    private SelectRow modelRow, effortRow, tierRow;
     private Button btnPicker;
     private LinearLayout layoutError;
     private TextView tvError;
@@ -146,12 +151,9 @@ public final class ProviderSettingsDialog {
     private Button btnSaveKey;
 
     private LinearLayout cardModel;
-    private Spinner spinnerModel;
     private Button btnCustomModel;
     private LinearLayout layoutEffort;
-    private Spinner spinnerEffort;
     private LinearLayout layoutTier;
-    private Spinner spinnerTier;
 
     private String lastOAuthUri = "";
 
@@ -165,6 +167,7 @@ public final class ProviderSettingsDialog {
 
     private ProviderSettingsDialog(Activity host, Runnable onChanged) {
         this.host = host;
+        this.ui = new android.view.ContextThemeWrapper(host, NativeAppearance.theme(host));
         this.onChanged = onChanged;
         this.density = host.getResources().getDisplayMetrics().density;
     }
@@ -173,83 +176,226 @@ public final class ProviderSettingsDialog {
         return (int) (val * density + 0.5f);
     }
 
+    /** A provider tap previews its catalog. Only tapping a model changes the conversation defaults. */
+    private PixelModelSheet quickSheet;
+    private boolean quickSaving;
+    private int quickRead;
+    private ProviderItem quickProvider;
+
+    public static void quick(Activity host, Runnable onChanged) {
+        if (host == null || host.isFinishing() || host.isDestroyed()) return;
+        new ProviderSettingsDialog(host, onChanged).presentQuick();
+    }
+
+    private void presentQuick() {
+        quickSheet = new PixelModelSheet(host, ui, () -> {
+            if (quickSaving) return;
+            quickSheet.dismiss();
+            show(host, onChanged);
+        }, this::closed);
+        quickSheet.present();
+        quickSheet.message("正在读取接口…");
+        final int gen = generation;
+        executor.execute(() -> {
+            try {
+                String pref = requestHttp("GET", "/api/multi/preferences", null);
+                String catalog = requestHttp("GET", "/api/providers", null);
+                mainHandler.post(() -> {
+                    if (stale(gen)) return;
+                    ProviderItem selected = readProviderCatalog(pref, catalog);
+                    currentItem = selected;
+                    List<ProviderItem> available = new ArrayList<>();
+                    for (ProviderItem item : providerList) {
+                        if (item.isOfficial || item.local || item.hasKey) available.add(item);
+                    }
+                    openQuickProvider(available, available.contains(selected) ? selected : available.get(0));
+                });
+            } catch (Exception e) {
+                mainHandler.post(() -> { if (!stale(gen)) quickSheet.message("无法读取接口：" + e.getMessage()); });
+            }
+        });
+    }
+
+    private void openQuickProvider(List<ProviderItem> available, ProviderItem item) {
+        if (item == null || quickSaving || isDismissed) return;
+        quickProvider = item;
+        final int gen = generation, read = ++quickRead;
+        List<String> names = new ArrayList<>();
+        for (ProviderItem p : available) names.add(p.isOfficial ? officialName(p) : p.label);
+        quickSheet.accounts(names, available.indexOf(item), i -> openQuickProvider(available, available.get(i)));
+        quickSheet.models(java.util.Collections.emptyList(), -1, i -> {});
+        quickSheet.message("正在读取模型…");
+        NativeRequests.call(host, "GET", "/api/multi/preferences?provider=" + Uri.encode(item.providerId), null, saved -> {
+            if (stale(gen) || read != quickRead) return;
+            final String model = saved.optString("model");
+            NativeRequests.call(host, "GET", modelPath(item, model), null, catalog -> {
+                if (stale(gen) || read != quickRead) return;
+                quickModels(item, model, catalog, "");
+            }, error -> {
+                if (!stale(gen) && read == quickRead) quickModels(item, model, new JSONObject(), "模型列表暂不可用");
+            });
+        }, error -> { if (!stale(gen) && read == quickRead) quickSheet.message(error); });
+    }
+
+    private void quickModels(ProviderItem item, String model, JSONObject catalog, String message) {
+        List<Choice> values = options(catalog.optJSONArray("models"), model, catalog.optString("defaultModel", item.defaultModel), true);
+        List<String> labels = new ArrayList<>();
+        int active = -1;
+        for (int i = 0; i < values.size(); i++) {
+            labels.add(values.get(i).label);
+            if (item == currentItem && values.get(i).id.equals(model)) active = i;
+        }
+        quickSheet.message(message);
+        quickSheet.models(labels, active, i -> saveQuick(item, values.get(i).id));
+    }
+
+    private void saveQuick(ProviderItem item, String model) {
+        if (isDismissed || quickSaving || item != quickProvider) return;
+        quickSaving = true;
+        quickSheet.busy(true);
+        final int gen = generation;
+        executor.execute(() -> {
+            try {
+                String body = new JSONObject().put("agent", item.agent).put("provider", item.providerId).put("model", model).toString();
+                requestHttp("POST", "/api/multi/preferences", body);
+                mainHandler.post(() -> {
+                    if (stale(gen)) return;
+                    hasChanges = true;
+                    quickSaving = false;
+                    quickSheet.dismiss();
+                });
+            } catch (Exception e) {
+                mainHandler.post(() -> {
+                    if (stale(gen)) return;
+                    quickSaving = false;
+                    quickSheet.busy(false);
+                    quickSheet.message(e.getMessage());
+                });
+            }
+        });
+    }
+
+    private String modelPath(ProviderItem p, String model) {
+        return "/api/multi/models?agent=" + Uri.encode(p.agent) + "&model=" + Uri.encode(model)
+                + "&provider=" + Uri.encode(p.providerId);
+    }
+
     private void present() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(host);
-        builder.setTitle("接口与模型");
+        dialog = new Dialog(ui, android.R.style.Theme_DeviceDefault_NoActionBar);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
 
-        ScrollView scrollView = new ScrollView(host);
-        scrollView.setFillViewport(true);
+            int surfaceColor = PixelUi.color(ui, "surface");
+            if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(true);
+            window.setBackgroundDrawable(new ColorDrawable(surfaceColor));
+            window.setStatusBarColor(surfaceColor);
+            window.setNavigationBarColor(surfaceColor);
 
-        LinearLayout root = new LinearLayout(host);
-        root.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        root.setPadding(pad, pad, pad, pad);
-        scrollView.addView(root, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            // Material surface luminance controls the two platform bar icon palettes.
+            int lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            View decor = window.getDecorView();
+            int flags = decor.getSystemUiVisibility() & ~lightBars;
+            decor.setSystemUiVisibility(Color.luminance(surfaceColor) > .5f ? flags | lightBars : flags);
+        }
 
-        btnPicker = createStyledButton("正在读取接口…");
-        btnPicker.setOnClickListener(v -> showProviderChoiceDialog());
-        root.addView(btnPicker);
+        LinearLayout root = vertical();
+        root.setBackgroundColor(PixelUi.color(ui, "surface"));
+        LinearLayout appbar = new LinearLayout(ui);
+        appbar.setOrientation(LinearLayout.HORIZONTAL);
+        appbar.setGravity(Gravity.CENTER_VERTICAL);
+        appbar.setPadding(dp(4), dp(8), dp(16), dp(8));
+        appbar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
 
-        layoutError = new LinearLayout(host);
+        View btnBack = PixelUi.icon(ui, "back", "返回", () -> dialog.dismiss());
+        appbar.addView(btnBack);
+
+        TextView tvHeading = new TextView(ui);
+        tvHeading.setText("接口与模型");
+        tvHeading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
+        tvHeading.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        tvHeading.setTextColor(PixelUi.color(ui, "onSurface"));
+        tvHeading.setPadding(dp(8), 0, 0, 0);
+        appbar.addView(tvHeading);
+        root.addView(appbar);
+
+        layoutError = new LinearLayout(ui);
         layoutError.setOrientation(LinearLayout.HORIZONTAL);
         layoutError.setGravity(Gravity.CENTER_VERTICAL);
-        layoutError.setPadding(0, dp(6), 0, dp(6));
+        layoutError.setPadding(dp(16), dp(4), dp(16), dp(4));
         layoutError.setVisibility(View.GONE);
 
-        tvError = new TextView(host);
-
+        tvError = new TextView(ui);
         tvError.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tvError.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        tvError.setTextColor(PixelUi.color(ui, "onSurfaceVariant"));
         LinearLayout.LayoutParams errLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
         layoutError.addView(tvError, errLp);
 
-        Button btnRetry = createStyledButton("重试");
+        Button btnRetry = action("重试");
         btnRetry.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         btnRetry.setOnClickListener(v -> reloadAll());
         layoutError.addView(btnRetry, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(layoutError);
 
-        progressBar = new ProgressBar(host, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar = new ProgressBar(ui, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setIndeterminate(true);
         progressBar.setVisibility(View.GONE);
         root.addView(progressBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(4)));
 
-        cardAccount = createCardContainer();
-        TextView tvAccTitle = createSectionTitle("官方账户登录");
-        cardAccount.addView(tvAccTitle);
+        ScrollView scrollView = new ScrollView(ui);
+        scrollView.setFillViewport(true);
+        scrollView.setVerticalScrollBarEnabled(false);
 
-        tvAccountStatus = new TextView(host);
-        tvAccountStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        LinearLayout scrollContent = vertical();
+        scrollContent.setPadding(0, 0, 0, dp(24));
+        scrollView.addView(scrollContent, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(scrollView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
 
+        LinearLayout officialCard = card();
+        officialGroup = vertical();
+        officialCard.addView(officialGroup);
+
+
+        cardAccount = vertical();
+        cardAccount.setPadding(dp(8), dp(4), dp(8), dp(4));
+
+        tvAccountStatus = bodyLabel("");
         tvAccountStatus.setPadding(0, dp(4), 0, dp(8));
-        cardAccount.addView(tvAccountStatus);
+        LinearLayout accountLine = new LinearLayout(ui);
+        accountLine.setGravity(Gravity.CENTER_VERTICAL);
+        accountLine.addView(tvAccountStatus, new LinearLayout.LayoutParams(0, -2, 1));
+        btnAccountAction = action("登录");
+        accountLine.addView(btnAccountAction, new LinearLayout.LayoutParams(-2, -2));
+        cardAccount.addView(accountLine);
 
-        btnAccountAction = createStyledButton("登录");
-        cardAccount.addView(btnAccountAction);
-
-        layoutCodeVerify = new LinearLayout(host);
-        layoutCodeVerify.setOrientation(LinearLayout.VERTICAL);
+        layoutCodeVerify = vertical();
         layoutCodeVerify.setVisibility(View.GONE);
-        layoutCodeVerify.setPadding(0, dp(6), 0, 0);
+        layoutCodeVerify.setPadding(0, dp(8), 0, 0);
 
-        tvUserCode = new TextView(host);
-        tvUserCode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        tvUserCode = new TextView(ui);
+        tvUserCode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         tvUserCode.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-
-        tvUserCode.setPadding(0, dp(4), 0, dp(6));
+        tvUserCode.setTextColor(PixelUi.color(ui, "primary"));
+        tvUserCode.setGravity(Gravity.CENTER);
+        tvUserCode.setPadding(0, dp(4), 0, dp(8));
         layoutCodeVerify.addView(tvUserCode);
 
-        LinearLayout rowCodeButtons = new LinearLayout(host);
+        LinearLayout rowCodeButtons = new LinearLayout(ui);
         rowCodeButtons.setOrientation(LinearLayout.HORIZONTAL);
 
-        btnCopyCode = createStyledButton("复制验证码");
+        btnCopyCode = action("复制验证码");
         LinearLayout.LayoutParams btnHalfLp1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
         btnHalfLp1.setMargins(0, 0, dp(4), 0);
         rowCodeButtons.addView(btnCopyCode, btnHalfLp1);
 
-        btnOpenUri = createStyledButton("打开验证网址");
+        btnOpenUri = action("打开验证网址");
         LinearLayout.LayoutParams btnHalfLp2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
         btnHalfLp2.setMargins(dp(4), 0, 0, 0);
         rowCodeButtons.addView(btnOpenUri, btnHalfLp2);
@@ -257,144 +403,143 @@ public final class ProviderSettingsDialog {
         layoutCodeVerify.addView(rowCodeButtons);
         cardAccount.addView(layoutCodeVerify);
 
-        layoutNeedsCode = new LinearLayout(host);
-        layoutNeedsCode.setOrientation(LinearLayout.VERTICAL);
+        layoutNeedsCode = vertical();
         layoutNeedsCode.setVisibility(View.GONE);
         layoutNeedsCode.setPadding(0, dp(8), 0, 0);
 
-        etManualCode = createStyledEditText("在此输入或粘贴授权码...", false);
+        etManualCode = createStyledEditText("粘贴授权码", false);
         layoutNeedsCode.addView(etManualCode);
 
-        btnSubmitManualCode = createStyledButton("提交授权码");
+        btnSubmitManualCode = action("提交授权码");
         layoutNeedsCode.addView(btnSubmitManualCode);
 
         cardAccount.addView(layoutNeedsCode);
-        root.addView(cardAccount);
+        officialCard.addView(cardAccount);
+        group(scrollContent, "官方账号", officialCard);
 
-        cardApiKey = createCardContainer();
-        TextView tvKeyTitle = createSectionTitle("API 凭证设置");
-        cardApiKey.addView(tvKeyTitle);
+        LinearLayout customGroup = vertical();
 
-        tvKeyStatus = new TextView(host);
-        tvKeyStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        LinearLayout pickerCard = card();
+        btnPicker = action("选择 API 接口");
+        btnPicker.setTextColor(PixelUi.color(ui, "onSurface"));
+        btnPicker.setBackground(PixelUi.clickable(ui, "surfaceContainerHigh", 16));
+        btnPicker.setOnClickListener(v -> showProviderChoiceDialog());
+        pickerCard.addView(btnPicker);
+        customGroup.addView(pickerCard);
 
+        cardApiKey = card();
+        tvKeyStatus = bodyLabel("");
         tvKeyStatus.setPadding(0, dp(4), 0, dp(6));
         cardApiKey.addView(tvKeyStatus);
 
-        etApiKey = createStyledEditText("输入新 API Key（留空不修改）...", true);
+        etApiKey = createStyledEditText("输入 API Key", true);
         cardApiKey.addView(etApiKey);
 
-        btnSaveKey = createStyledButton("保存密钥");
+        btnSaveKey = action("保存密钥");
         btnSaveKey.setOnClickListener(v -> saveApiKey());
         cardApiKey.addView(btnSaveKey);
+        customGroup.addView(cardApiKey);
 
-        root.addView(cardApiKey);
+        cardModel = card();
 
-        cardModel = createCardContainer();
-        TextView tvModelTitle = createSectionTitle("模型与参数偏好");
-        cardModel.addView(tvModelTitle);
-
-        TextView tvModelLbl = createLabel("选择模型：");
-        cardModel.addView(tvModelLbl);
-
-        spinnerModel = new Spinner(host);
-        cardModel.addView(spinnerModel);
-
-        btnCustomModel = createStyledButton("输入自定义模型名称...");
-        btnCustomModel.setVisibility(View.GONE);
+        modelRow = new SelectRow("默认模型", "model");
+        effortRow = new SelectRow("思考强度", "effort");
+        tierRow = new SelectRow("处理速度", "serviceTier");
+        layoutEffort = effortRow.view;
+        layoutTier = tierRow.view;
+        cardModel.addView(modelRow.view);
+        cardModel.addView(layoutEffort);
+        cardModel.addView(layoutTier);
+        btnCustomModel = action("输入自定义模型");
         btnCustomModel.setOnClickListener(v -> showCustomModelDialog());
         cardModel.addView(btnCustomModel);
-
-        layoutEffort = new LinearLayout(host);
-        layoutEffort.setOrientation(LinearLayout.VERTICAL);
-        layoutEffort.setVisibility(View.GONE);
-        layoutEffort.setPadding(0, dp(6), 0, 0);
-
-        TextView tvEffortLbl = createLabel("思考程度（Reasoning Effort）：");
-        layoutEffort.addView(tvEffortLbl);
-
-        spinnerEffort = new Spinner(host);
-        layoutEffort.addView(spinnerEffort);
-        cardModel.addView(layoutEffort);
-
-        layoutTier = new LinearLayout(host);
-        layoutTier.setOrientation(LinearLayout.VERTICAL);
-        layoutTier.setVisibility(View.GONE);
-        layoutTier.setPadding(0, dp(6), 0, 0);
-
-        TextView tvTierLbl = createLabel("速度（Fast）");
-        layoutTier.addView(tvTierLbl);
-
-        spinnerTier = new Spinner(host);
-        layoutTier.addView(spinnerTier);
-        cardModel.addView(layoutTier);
-
-        root.addView(cardModel);
+        group(scrollContent, "模型偏好", cardModel);
+        group(scrollContent, "第三方接口", customGroup);
 
         cardAccount.setVisibility(View.GONE);
         cardApiKey.setVisibility(View.GONE);
         cardModel.setVisibility(View.GONE);
-        setupSpinners();
 
-        builder.setView(scrollView);
-        builder.setPositiveButton("完成", (d, which) -> d.dismiss());
-
-        dialog = builder.create();
-        dialog.setOnDismissListener(d -> {
-            isDismissed = true;
-            generation++;
-            stopPolling();
-            if (hasChanges && onChanged != null) {
-                executor.execute(() -> mainHandler.post(() -> {
-                    if (!host.isFinishing() && !host.isDestroyed()) onChanged.run();
-                }));
-            }
-            executor.shutdown();
-        });
-
+        dialog.setContentView(root);
+        watchWindow(dialog, this::closed);
         dialog.show();
+        if (window != null) window.setLayout(-1, -1);
         reloadAll();
     }
 
-    private LinearLayout createCardContainer() {
-        LinearLayout card = new LinearLayout(host);
-        card.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(12);
-        card.setPadding(pad, pad, pad, pad);
+    static void watchWindow(Dialog dialog, Runnable closed) {
+        dialog.setOnDismissListener(unused -> closed.run());
+        dialog.getWindow().getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) { }
+            @Override public void onViewDetachedFromWindow(View view) {
+                view.removeOnAttachStateChangeListener(this);
+                closed.run();
+            }
+        });
+    }
+
+    private void closed() {
+        if (isDismissed) return;
+        isDismissed = true;
+        generation++;
+        stopPolling();
+        if (hasChanges && onChanged != null) {
+            executor.execute(() -> mainHandler.post(() -> {
+                if (!host.isFinishing() && !host.isDestroyed()) onChanged.run();
+            }));
+        }
+        executor.shutdown();
+    }
+
+    private LinearLayout vertical() {
+        LinearLayout layout = new LinearLayout(ui);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        return layout;
+    }
+
+    private LinearLayout card() {
+        LinearLayout c = vertical();
+        c.setBackground(PixelUi.shape(ui, "surfaceContainer", 20));
+        int pad = dp(8);
+        c.setPadding(pad, pad, pad, pad);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, dp(6), 0, dp(6));
-        card.setLayoutParams(lp);
-        return card;
+        lp.setMargins(dp(16), dp(4), dp(16), dp(4));
+        c.setLayoutParams(lp);
+        return c;
     }
 
-    private TextView createSectionTitle(String text) {
-        TextView tv = new TextView(host);
+    private TextView caption(String text) {
+        TextView tv = new TextView(ui);
         tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        tv.setTypeface(Typeface.DEFAULT_BOLD);
-
-        tv.setPadding(0, 0, 0, dp(4));
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        tv.setTextColor(PixelUi.color(ui, "onSurfaceVariant"));
         return tv;
     }
 
-    private TextView createLabel(String text) {
-        TextView tv = new TextView(host);
+    private TextView bodyLabel(String text) {
+        TextView tv = new TextView(ui);
         tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-
-        tv.setPadding(0, dp(4), 0, dp(2));
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        tv.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        tv.setTextColor(PixelUi.color(ui, "onSurface"));
         return tv;
     }
 
-    private Button createStyledButton(String text) {
-        Button btn = new Button(host);
+    private Button action(String text) {
+        Button btn = new Button(ui);
         btn.setText(text);
-
         btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         btn.setTransformationMethod(null);
-        int padH = dp(12);
-        int padV = dp(8);
+        btn.setTextColor(PixelUi.color(ui, "onPrimaryContainer"));
+        btn.setBackgroundTintList(null);
+        btn.setBackground(PixelUi.clickable(ui, "primaryContainer", 24));
+        btn.setMinHeight(dp(48));
+        btn.setMinimumHeight(dp(48));
+        int padH = dp(16);
+        int padV = dp(12);
         btn.setPadding(padH, padV, padH, padV);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -403,16 +548,38 @@ public final class ProviderSettingsDialog {
         return btn;
     }
 
+    private LinearLayout group(ViewGroup parent, String label, View content) {
+        LinearLayout container = vertical();
+        if (label != null && !label.isEmpty()) {
+            TextView tv = caption(label);
+            tv.setPadding(dp(20), dp(12), dp(20), dp(4));
+            container.addView(tv);
+        }
+        if (content != null) {
+            container.addView(content);
+        }
+        if (parent != null) {
+            parent.addView(container);
+        }
+        return container;
+    }
+
     private EditText createStyledEditText(String hint, boolean isPassword) {
-        EditText et = new EditText(host);
+        EditText et = new EditText(ui);
         et.setHint(hint);
         et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        et.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        et.setTextColor(PixelUi.color(ui, "onSurface"));
+        et.setHintTextColor(PixelUi.color(ui, "onSurfaceVariant"));
+        et.setBackground(PixelUi.shape(ui, "surfaceContainerHigh", 12));
+        et.setMinHeight(dp(48));
+        et.setMinimumHeight(dp(48));
         if (isPassword) {
             et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         } else {
             et.setInputType(InputType.TYPE_CLASS_TEXT);
         }
-        int pad = dp(10);
+        int pad = dp(12);
         et.setPadding(pad, pad, pad, pad);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -421,51 +588,216 @@ public final class ProviderSettingsDialog {
         return et;
     }
 
-    private void setupSpinners() {
-        spinnerModel.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (isBindingModel) return;
-                SpinnerOption opt = (SpinnerOption) parent.getItemAtPosition(position);
-                if (opt != null && !opt.id.equals(curModel)) {
-                    curModel = opt.id;
-                    updatePreferenceField("model", curModel);
+    private void renderProviderRows() {
+        officialGroup.removeAllViews();
+
+        final String[] titles = {"Claude 登录", "ChatGPT 登录", "Google 登录"};
+        final String[] subtitles = {"Claude Code", "Codex", "Antigravity"};
+        final String[] monograms = {"C", "O", "G"};
+        for (ProviderItem item : providerList) {
+            if (!item.isOfficial) continue;
+            int i = item.officialType - 1;
+            final boolean isSelected = (currentItem != null && item.entryKey.equals(currentItem.entryKey));
+
+            final LinearLayout row = new LinearLayout(ui);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setMinimumHeight(dp(56));
+            row.setFocusable(true);
+            row.setClickable(true);
+            markChoice(row, titles[i] + "，" + subtitles[i], isSelected);
+
+            row.setBackground(PixelUi.clickable(ui, isSelected ? "primaryContainer" : null, 20));
+            row.setPadding(dp(12), dp(8), dp(16), dp(8));
+
+            TextView mono = new TextView(ui);
+            mono.setText(monograms[i]);
+            mono.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            mono.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+            mono.setGravity(Gravity.CENTER);
+            mono.setTextColor(PixelUi.color(ui, isSelected ? "onPrimaryContainer" : "onSurfaceVariant"));
+            GradientDrawable monoBg = new GradientDrawable();
+            monoBg.setShape(GradientDrawable.OVAL);
+            monoBg.setColor(PixelUi.color(ui, isSelected ? "surface" : "surfaceContainerHigh"));
+            mono.setBackground(monoBg);
+            LinearLayout.LayoutParams monoLp = new LinearLayout.LayoutParams(dp(40), dp(40));
+            monoLp.setMarginEnd(dp(16));
+            row.addView(mono, monoLp);
+
+            LinearLayout textCol = new LinearLayout(ui);
+            textCol.setOrientation(LinearLayout.VERTICAL);
+            textCol.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+
+            TextView tvTitle = new TextView(ui);
+            tvTitle.setText(titles[i]);
+            tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            tvTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            tvTitle.setTextColor(PixelUi.color(ui, isSelected ? "onPrimaryContainer" : "onSurface"));
+            textCol.addView(tvTitle);
+
+            TextView tvSub = new TextView(ui);
+            tvSub.setText(subtitles[i]);
+            tvSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            tvSub.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+            tvSub.setTextColor(PixelUi.color(ui, isSelected ? "onPrimaryContainer" : "onSurfaceVariant"));
+            textCol.addView(tvSub);
+
+            row.addView(textCol, textLp);
+
+            RadioButton radio = new RadioButton(ui);
+            radio.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            radio.setChecked(isSelected);
+            radio.setClickable(false);
+            radio.setFocusable(false);
+            int radioTint = PixelUi.color(ui, isSelected ? "primary" : "outlineVariant");
+            radio.setButtonTintList(ColorStateList.valueOf(radioTint));
+            LinearLayout.LayoutParams radioLp = new LinearLayout.LayoutParams(dp(48), dp(48));
+            radioLp.gravity = Gravity.CENTER_VERTICAL;
+            row.addView(radio, radioLp);
+
+            row.setOnClickListener(v -> { if (item != currentItem) selectProvider(item); });
+
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowLp.setMargins(0, dp(2), 0, dp(2));
+            officialGroup.addView(row, rowLp);
+        }
+    }
+
+    private final class SelectRow {
+        final String title;
+        final String key;
+        final LinearLayout view;
+        final TextView titleView;
+        final TextView subtitleView;
+        final List<Choice> options = new ArrayList<>();
+
+        private String selectedId = "";
+        private int boundGen = 0;
+        private ProviderItem boundItem = null;
+
+        SelectRow(String title, String key) {
+            this.title = title;
+            this.key = key;
+
+            view = new LinearLayout(ui);
+            view.setOrientation(LinearLayout.HORIZONTAL);
+            view.setGravity(Gravity.CENTER_VERTICAL);
+            view.setMinimumHeight(dp(56));
+            view.setFocusable(true);
+            view.setClickable(true);
+            view.setPadding(dp(16), dp(10), dp(16), dp(10));
+
+            view.setBackground(PixelUi.clickable(ui, null, 16));
+
+            LinearLayout textCol = new LinearLayout(ui);
+            textCol.setOrientation(LinearLayout.VERTICAL);
+            textCol.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+
+            titleView = new TextView(ui);
+            titleView.setText(title);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            titleView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            titleView.setTextColor(PixelUi.color(ui, "onSurface"));
+            textCol.addView(titleView);
+
+            subtitleView = new TextView(ui);
+            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            subtitleView.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+            subtitleView.setTextColor(PixelUi.color(ui, "onSurfaceVariant"));
+            textCol.addView(subtitleView);
+
+            view.addView(textCol, textLp);
+
+            TextView chevron = new TextView(ui);
+            chevron.setText("›");
+            chevron.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+            chevron.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+            chevron.setTextColor(PixelUi.color(ui, "onSurfaceVariant"));
+            chevron.setGravity(Gravity.CENTER);
+            view.addView(chevron, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+            view.setOnClickListener(v -> show());
+        }
+
+        void bind(JSONArray entries, String current, String defaultValue, boolean model) {
+            boundGen = generation;
+            boundItem = currentItem;
+            options.clear();
+
+            options.addAll(options(entries, current, defaultValue, model));
+            selectedId = current;
+            for (Choice option : options) {
+                if (option.id.equals(current)) subtitleView.setText(option.label);
+            }
+            view.setContentDescription(title + "，" + subtitleView.getText());
+            view.setVisibility(View.VISIBLE);
+        }
+
+        void show() {
+            if (options.isEmpty() || stale(boundGen) || currentItem != boundItem) return;
+            final int genAtShow = boundGen;
+            final ProviderItem itemAtShow = boundItem;
+
+            final List<Choice> snapshot = new ArrayList<>(options);
+            final String[] labels = new String[snapshot.size()];
+            int selectedIndex = -1;
+            for (int i = 0; i < snapshot.size(); i++) {
+                Choice opt = snapshot.get(i);
+                labels[i] = opt.label;
+                if (opt.id.equals(selectedId)) {
+                    selectedIndex = i;
                 }
             }
 
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
+            new AlertDialog.Builder(ui)
+                    .setTitle(title)
+                    .setSingleChoiceItems(labels, selectedIndex, (dialog, which) -> {
+                        dialog.dismiss();
+                        if (stale(genAtShow) || currentItem != itemAtShow) return;
+                        if (which < 0 || which >= snapshot.size()) return;
 
-        spinnerEffort.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (isBindingEffort) return;
-                SpinnerOption opt = (SpinnerOption) parent.getItemAtPosition(position);
-                if (opt != null && !opt.id.equals(curEffort)) {
-                    curEffort = opt.id;
-                    updatePreferenceField("effort", curEffort);
-                }
+                        Choice chosen = snapshot.get(which);
+                        if (chosen.id.equals(selectedId)) return;
+
+                        selectedId = chosen.id;
+                        subtitleView.setText(chosen.label);
+                        view.setContentDescription(title + "，" + chosen.label);
+
+                        if ("model".equals(key)) {
+                            curModel = chosen.id;
+                        } else if ("effort".equals(key)) {
+                            curEffort = chosen.id;
+                        } else if ("serviceTier".equals(key)) {
+                            curServiceTier = chosen.id;
+                        }
+
+                        updatePreferenceField(key, chosen.id);
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        }
+    }
+
+    static void markChoice(View view, String label, boolean checked) {
+        view.setContentDescription(label);
+        view.setSelected(checked);
+        view.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View v, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(v, info);
+                info.setClassName(RadioButton.class.getName());
+                info.setCheckable(true);
+                info.setChecked(checked);
             }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
         });
+    }
 
-        spinnerTier.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (isBindingTier) return;
-                SpinnerOption opt = (SpinnerOption) parent.getItemAtPosition(position);
-                if (opt != null && !opt.id.equals(curServiceTier)) {
-                    curServiceTier = opt.id;
-                    updatePreferenceField("serviceTier", curServiceTier);
-                }
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
+    private String officialName(ProviderItem item) {
+        if (item.officialType == TYPE_CHATGPT) return "ChatGPT";
+        if (item.officialType == TYPE_GOOGLE) return "Google";
+        return "Claude";
     }
 
     private void showProviderChoiceDialog() {
@@ -474,10 +806,12 @@ public final class ProviderSettingsDialog {
             return;
         }
 
+        List<ProviderItem> apis = new ArrayList<>();
+        for (ProviderItem item : providerList) if (!item.isOfficial) apis.add(item);
         List<String> names = new ArrayList<>();
         int checkedIndex = -1;
-        for (int i = 0; i < providerList.size(); i++) {
-            ProviderItem item = providerList.get(i);
+        for (int i = 0; i < apis.size(); i++) {
+            ProviderItem item = apis.get(i);
             names.add(item.label);
             if (currentItem != null && item.entryKey.equals(currentItem.entryKey)) {
                 checkedIndex = i;
@@ -486,14 +820,14 @@ public final class ProviderSettingsDialog {
         names.add("＋ 添加自定义接口…");
 
         String[] itemsArray = names.toArray(new String[0]);
-        AlertDialog.Builder b = new AlertDialog.Builder(host);
-        b.setTitle("选择接口");
+        AlertDialog.Builder b = new AlertDialog.Builder(ui);
+        b.setTitle("选择 API 接口");
         b.setSingleChoiceItems(itemsArray, checkedIndex, (dialogInterface, which) -> {
             dialogInterface.dismiss();
-            if (which == providerList.size()) {
+            if (which == apis.size()) {
                 showAddCustomProviderDialog();
             } else {
-                ProviderItem selected = providerList.get(which);
+                ProviderItem selected = apis.get(which);
                 selectProvider(selected);
             }
         });
@@ -502,10 +836,10 @@ public final class ProviderSettingsDialog {
     }
 
     private void showAddCustomProviderDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(host);
+        AlertDialog.Builder b = new AlertDialog.Builder(ui);
         b.setTitle("添加自定义厂商");
 
-        LinearLayout layout = new LinearLayout(host);
+        LinearLayout layout = new LinearLayout(ui);
         layout.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(16);
         layout.setPadding(pad, pad, pad, pad);
@@ -535,10 +869,10 @@ public final class ProviderSettingsDialog {
     }
 
     private void showCustomModelDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(host);
+        AlertDialog.Builder b = new AlertDialog.Builder(ui);
         b.setTitle("输入自定义模型");
 
-        LinearLayout layout = new LinearLayout(host);
+        LinearLayout layout = new LinearLayout(ui);
         layout.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(16);
         layout.setPadding(pad, pad, pad, pad);
@@ -596,6 +930,10 @@ public final class ProviderSettingsDialog {
     }
 
     private void parseInitialData(String prefJson, String provJson) {
+        selectProviderInternal(readProviderCatalog(prefJson, provJson), false);
+    }
+
+    private ProviderItem readProviderCatalog(String prefJson, String provJson) {
         JSONObject prefObj = null;
         try {
             prefObj = new JSONObject(prefJson);
@@ -653,7 +991,7 @@ public final class ProviderSettingsDialog {
             target = providerList.get(0);
         }
 
-        selectProviderInternal(target, false);
+        return target;
     }
 
     private ProviderItem findProviderByEntryKey(String key) {
@@ -676,7 +1014,8 @@ public final class ProviderSettingsDialog {
         btnSaveKey.setEnabled(true);
         btnSubmitManualCode.setEnabled(true);
         currentItem = item;
-        btnPicker.setText(item.label);
+        btnPicker.setText(item.isOfficial ? "选择 API 接口" : item.label);
+        renderProviderRows();
         stopPolling();
 
         lastOAuthUri = "";
@@ -690,6 +1029,7 @@ public final class ProviderSettingsDialog {
             cardApiKey.setVisibility(View.GONE);
             btnCustomModel.setVisibility(View.VISIBLE);
 
+            btnAccountAction.setContentDescription(officialName(item) + " 账号登录");
             setupAccountActions();
 
             tvAccountStatus.setText("正在检查登录状态…");
@@ -1151,9 +1491,7 @@ public final class ProviderSettingsDialog {
 
         executor.execute(() -> {
             try {
-                String path = "/api/multi/models?agent=" + Uri.encode(item.agent) + "&model=" + Uri.encode(modelParam);
-                path += "&provider=" + Uri.encode(item.providerId);
-                String resp = requestHttp("GET", path, null);
+                String resp = requestHttp("GET", modelPath(item, modelParam), null);
                 JSONObject obj = new JSONObject(resp);
 
                 mainHandler.post(() -> {
@@ -1173,62 +1511,35 @@ public final class ProviderSettingsDialog {
     }
 
     private void bindCapabilities(JSONObject obj) {
-        isBindingModel = true;
-        bindSpinner(spinnerModel, obj.optJSONArray("models"), curModel,
-                obj.optString("defaultModel", currentItem.defaultModel), true);
-        isBindingModel = false;
+        modelRow.bind(obj.optJSONArray("models"), curModel, obj.optString("defaultModel", currentItem.defaultModel), true);
         JSONArray efforts = obj.optJSONArray("efforts");
-        boolean showEffort = efforts != null && efforts.length() > 0;
-        layoutEffort.setVisibility(showEffort ? View.VISIBLE : View.GONE);
-        if (showEffort) {
-            isBindingEffort = true;
-            bindSpinner(spinnerEffort, efforts, curEffort, obj.optString("defaultEffort"), false);
-            isBindingEffort = false;
-        }
+        if (efforts != null && efforts.length() > 0) {
+            effortRow.bind(efforts, curEffort, obj.optString("defaultEffort"), false);
+        } else layoutEffort.setVisibility(View.GONE);
         JSONArray tiers = obj.optJSONArray("serviceTiers");
-        boolean showTier = currentItem.officialType == TYPE_CHATGPT && tiers != null && tiers.length() > 0;
-        layoutTier.setVisibility(showTier ? View.VISIBLE : View.GONE);
-        if (showTier) {
-            isBindingTier = true;
-            bindSpinner(spinnerTier, tiers, curServiceTier, obj.optString("defaultServiceTier"), false);
-            isBindingTier = false;
-        }
+        if (currentItem.officialType == TYPE_CHATGPT && tiers != null && tiers.length() > 0) {
+            tierRow.bind(tiers, curServiceTier, obj.optString("defaultServiceTier"), false);
+        } else layoutTier.setVisibility(View.GONE);
     }
 
-    private void bindSpinner(Spinner spinner, JSONArray entries, String current, String defaultValue, boolean customModel) {
-        List<SpinnerOption> options = new ArrayList<>();
-        options.add(new SpinnerOption("", defaultValue.isEmpty() ? "引擎默认" : "默认（" + defaultValue + "）"));
-        int selected = 0;
+    private List<Choice> options(JSONArray entries, String current, String defaultValue, boolean customModel) {
+        List<Choice> values = new ArrayList<>();
+        values.add(new Choice("", defaultValue.isEmpty() ? "引擎默认" : "默认（" + defaultValue + "）"));
+        boolean matched = current.isEmpty();
         if (entries != null) for (int i = 0; i < entries.length(); i++) {
             JSONObject entry = entries.optJSONObject(i);
             if (entry == null) continue;
             String id = entry.optString("id");
             if (id.isEmpty()) continue;
-            if (id.equals(current)) selected = options.size();
-            options.add(new SpinnerOption(id, entry.optString("label", id)));
+            if (id.equals(current)) matched = true;
+            values.add(new Choice(id, entry.optString("label", id)));
         }
-        if (!current.isEmpty() && selected == 0) {
-            selected = options.size();
-            options.add(new SpinnerOption(current, current + (customModel ? "（自定义）" : "（已保存）")));
-        }
-        ArrayAdapter<SpinnerOption> adapter = new ArrayAdapter<>(host, android.R.layout.simple_spinner_item, options);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-        spinner.setSelection(selected);
+        if (!matched) values.add(new Choice(current, current + (customModel ? "（自定义）" : "（已保存）")));
+        return values;
     }
 
     private void bindFallbackCapabilities() {
-        List<SpinnerOption> list = new ArrayList<>();
-        list.add(new SpinnerOption("", "默认模型"));
-        if (!TextUtils.isEmpty(curModel)) {
-            list.add(new SpinnerOption(curModel, curModel));
-        }
-        isBindingModel = true;
-        ArrayAdapter<SpinnerOption> adapter = new ArrayAdapter<>(host, android.R.layout.simple_spinner_dropdown_item, list);
-        spinnerModel.setAdapter(adapter);
-        spinnerModel.setSelection(list.size() > 1 ? 1 : 0);
-        isBindingModel = false;
-
+        modelRow.bind(null, curModel, currentItem.defaultModel, true);
         layoutEffort.setVisibility(View.GONE);
         layoutTier.setVisibility(View.GONE);
     }

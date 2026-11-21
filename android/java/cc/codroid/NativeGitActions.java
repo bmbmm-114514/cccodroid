@@ -18,12 +18,7 @@ public class NativeGitActions {
     }
 
     public static void add(NativeHome h, LinearLayout parent, String dir, Runnable refresh) {
-        Button more = new Button(h.a);
-        more.setText("更多");
-        more.setMinimumWidth(h.dp(44));
-        more.setMinWidth(h.dp(44));
-        parent.addView(more);
-        more.setOnClickListener(view -> {
+        parent.addView(PixelUi.icon(h.a, "more", "更多 Git 操作", () -> {
             String[] items = {"提交日志", "拉取 (Pull)", "推送 (Push)", "抓取 (Fetch)", "设置身份"};
             new AlertDialog.Builder(h.a).setTitle("Git 操作")
                 .setItems(items, (di, which) -> {
@@ -40,7 +35,7 @@ public class NativeGitActions {
                             .setNegativeButton("取消", null).show();
                     } else if (which == 4) showIdentity(h, dir);
                 }).show();
-        });
+        }));
     }
 
     private static void showLog(NativeHome h, String dir) {

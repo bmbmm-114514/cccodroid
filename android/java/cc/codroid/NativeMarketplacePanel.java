@@ -11,11 +11,10 @@ public class NativeMarketplacePanel {
     public static void show(NativeHome h, LinearLayout root) {
         root.removeAllViews();
 
-        LinearLayout marketSec = new LinearLayout(h.a);
-        marketSec.setOrientation(LinearLayout.VERTICAL);
-        root.addView(marketSec);
+        LinearLayout marketSec = PixelUi.group(root);
+        marketSec.setPadding(h.dp(12), h.dp(12), h.dp(12), h.dp(12));
 
-        h.text(marketSec, "── 插件市场源 ──");
+        h.text(marketSec, "插件市场源");
         h.button(marketSec, "＋ 添加市场源", () -> {
             EditText et = new EditText(h.a);
             et.setHint("Git 仓库 URL 或本地路径");
@@ -58,8 +57,7 @@ public class NativeMarketplacePanel {
                 LinearLayout row = new LinearLayout(h.a);
                 row.setOrientation(LinearLayout.VERTICAL);
                 row.setPadding(0, h.dp(4), 0, h.dp(4));
-                TextView tv = h.text(row, name + (src.isEmpty() ? "" : "\n" + src));
-                tv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+                h.text(row, name + (src.isEmpty() ? "" : "\n" + src));
                 h.button(row, "删除", () -> confirm(h, "删除市场源", "确定删除市场源「" + name + "」？", () -> {
                     h.post("/api/ext/marketplaces/remove", NativeHome.json("name", name), r -> {
                         if (!root.isAttachedToWindow()) return;
@@ -75,12 +73,10 @@ public class NativeMarketplacePanel {
             }
         });
 
-        LinearLayout skillSec = new LinearLayout(h.a);
-        skillSec.setOrientation(LinearLayout.VERTICAL);
-        skillSec.setPadding(0, h.dp(12), 0, 0);
-        root.addView(skillSec);
+        LinearLayout skillSec = PixelUi.group(root);
+        skillSec.setPadding(h.dp(12), h.dp(12), h.dp(12), h.dp(12));
 
-        h.text(skillSec, "── 技能市场目录 ──");
+        h.text(skillSec, "技能市场目录");
         h.get("/api/ext/catalog/skills", res -> {
             if (!root.isAttachedToWindow() || res == null) return;
             if (!res.optBoolean("ok", true)) {

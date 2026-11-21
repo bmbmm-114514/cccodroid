@@ -38,8 +38,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Java 测试
-        run: sh scripts/java-tests.sh
+      - name: Java 和原生 Android UI 测试
+        run: |
+          sh scripts/java-tests.sh
+          sh scripts/android-gradle.sh testDebugUnitTest
 
   build:
     needs: test
@@ -91,7 +93,7 @@ jobs:
         run: |
           BT="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS"
           export CC_ANDROID="$ANDROID_SDK_ROOT/ndk/$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
-          export JAVAC=javac D8="$BT/d8" AAPT2="$BT/aapt2" ANDROID_JAR="$ANDROID_SDK_ROOT/platforms/$PLATFORM/android.jar"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
           export SIGN=apksigner APKSIGNER="$BT/apksigner" ZIPALIGN="$BT/zipalign"
           sh scripts/build.sh
           rm -f "$RUNNER_TEMP/key.json"

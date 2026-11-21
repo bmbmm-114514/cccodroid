@@ -5,11 +5,8 @@ import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.Spinner;
 import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -17,60 +14,45 @@ import org.json.JSONObject;
 public final class NativeExtensionPanel {
     private int reqTicket;
 
-    public static void show(NativeHome h) { new NativeExtensionPanel().render(h); }
+    private static final String[][] PAGES = {
+        {"plugins","extension","插件管理","启用、安装与移除插件"},
+        {"mcp","device","MCP 服务","连接工具与外部服务"},
+        {"skills","bookmark","技能扩展","安装与管理技能"},
+        {"components","storage","可选组件","组件版本与安装状态"},
+        {"market","projects","扩展市场","市场来源与可用技能"},
+        {"hooks","terminal","Hooks","设置事件触发的操作"}
+    };
+
+    public static void show(NativeHome h) {
+        new NativeExtensionPanel().render(h);
+    }
 
     private void render(NativeHome h) {
-        final int gen = h.generation;
-        h.body.setOrientation(LinearLayout.VERTICAL);
-
-        LinearLayout topBar = new LinearLayout(h.a);
-        topBar.setOrientation(LinearLayout.VERTICAL);
-        topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setPadding(h.dp(12), h.dp(8), h.dp(12), h.dp(8));
-        h.body.addView(topBar);
-
-        TextView title = h.text(topBar, "扩展类型: ");
-        title.setTextSize(15);
-
-        Spinner spinner = new Spinner(h.a);
-        spinner.setAdapter(new ArrayAdapter<>(h.a,
-            android.R.layout.simple_spinner_dropdown_item,
-            new String[]{"插件管理", "MCP 服务", "技能扩展", "可选组件", "扩展市场", "Hooks"}));
-        topBar.addView(spinner);
-
-        LinearLayout scroll = h.scrolling();
-
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                if (h.generation != gen) return;
-                scroll.removeAllViews();
-                int ticket = ++reqTicket;
-                if (pos == 0) renderPlugins(h, scroll, gen, ticket);
-                else if (pos == 1) renderMcp(h, scroll, gen, ticket);
-                else if (pos == 2) renderSkills(h, scroll, gen, ticket);
-                else if (pos == 3) renderComponents(h, scroll, gen, ticket);
-                else {
-                    LinearLayout page = new LinearLayout(h.a);
-                    page.setOrientation(LinearLayout.VERTICAL);
-                    scroll.addView(page);
-                    if (pos == 4) NativeMarketplacePanel.show(h, page);
-                    else NativeHooksPanel.show(h, page);
-                }
+        LinearLayout content = h.scrolling();
+        if ("ext".equals(h.screen)) {
+            LinearLayout group = PixelUi.group(content);
+            for (String[] page : PAGES) {
+                PixelUi.row(group, page[1], page[2], page[3], () -> h.nav("ext-" + page[0]));
             }
-            @Override public void onNothingSelected(AdapterView<?> p) {}
-        });
+            return;
+        }
+        for (String[] page : PAGES) {
+            if (("ext-" + page[0]).equals(h.screen)) h.setHeading(page[2], null);
+        }
+        int ticket = ++reqTicket;
+        switch (h.screen) {
+            case "ext-plugins": renderPlugins(h, content, h.generation, ticket); break;
+            case "ext-mcp": renderMcp(h, content, h.generation, ticket); break;
+            case "ext-skills": renderSkills(h, content, h.generation, ticket); break;
+            case "ext-components": renderComponents(h, content, h.generation, ticket); break;
+            case "ext-market": NativeMarketplacePanel.show(h, content); break;
+            case "ext-hooks": NativeHooksPanel.show(h, content); break;
+        }
     }
 
     private LinearLayout card(NativeHome h, LinearLayout parent) {
-        LinearLayout c = new LinearLayout(h.a);
-        c.setOrientation(LinearLayout.VERTICAL);
-        c.setPadding(h.dp(12), h.dp(8), h.dp(12), h.dp(8));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, h.dp(6));
-        c.setLayoutParams(lp);
-        parent.addView(c);
+        LinearLayout c = PixelUi.group(parent);
+        c.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(12));
         return c;
     }
 

@@ -49,18 +49,21 @@ public class NativeRuntimePanel {
     }
 
     public static void show(NativeHome h, String id) {
-        LinearLayout root = h.scrolling();
+        LinearLayout page = h.scrolling();
+        LinearLayout root = PixelUi.group(page);
         int pad = h.dp(16);
         root.setPadding(pad, pad, pad, h.dp(32));
 
 
         if ("usage".equals(id)) {
             NativeEnergyPanel.add(h, root);
-            h.text(root, "Claude Code 本地用量");
-            TextView tvUsage = h.text(root, "正在读取用量...");
+            LinearLayout usage = PixelUi.group(page);
+            usage.setPadding(pad,pad,pad,pad);
+            h.text(usage, "Claude Code 本地用量");
+            TextView tvUsage = h.text(usage, "正在读取用量...");
 
             final JSONObject[] usHolder = new JSONObject[1];
-            LinearLayout uRow1 = row(h, root);
+            LinearLayout uRow1 = row(h, usage);
             h.button(uRow1, "时段明细", () -> {
                 JSONObject us = usHolder[0];
                 JSONObject hours = us != null ? us.optJSONObject("hours") : null;
@@ -106,7 +109,7 @@ public class NativeRuntimePanel {
                     })).setNegativeButton("取消", null).show();
             });
 
-            LinearLayout uRow2 = row(h, root);
+            LinearLayout uRow2 = row(h, usage);
             h.button(uRow2, "事件账本", () -> h.get("/api/ledger?n=60", r -> {
                 JSONArray items = r.optJSONArray("items");
                 if (items == null || items.length() == 0) { h.notice("账本中暂无记录"); return; }
@@ -153,7 +156,7 @@ public class NativeRuntimePanel {
             return;
         }
         TextView tvStatus = h.text(root, "正在读取状态…");
-        h.text(root, "\n【能力与扩展】");
+        h.text(root, "能力与扩展");
         TextView tvCaps = h.text(root, "正在读取系统能力...");
         final JSONObject[] cpHolder = new JSONObject[1];
 

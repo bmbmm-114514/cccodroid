@@ -4,9 +4,9 @@
 
 This fork starts at upstream v0.7.14. Choose Claude Code, Codex, or Antigravity and its model in the main model and provider settings, then continue in the current chat. The APK includes all three clients and the base runtime for offline first-time setup. The built-in terminal exposes the same clients as `claude`, `codex`, and `agy`. Each client retains its native sign-in and session. Claude and Codex can hand work off from a native session fork using the original provider or a configured third-party model. Manual handoff sends the turns you select. Leaving Antigravity uses manual handoff.
 
-The native Android interface follows system wallpaper colors on Android 12+ and system light/dark mode on older releases. Settings offers all five classic themes. The provider selector includes separate Claude, ChatGPT and Google sign-ins. Reasoning controls follow the selected model, with Fast available for supported Codex models.
+The default Material 3 interface uses wallpaper colors on Android 12+ and a light or dark palette on older releases. The four main destinations appear at the bottom on phones and in a navigation rail on wider windows. Tap the model in the chat toolbar to choose a provider and model for the next message in the same conversation. Settings retains all five classic themes. Open the full provider settings to sign into Claude, ChatGPT or Google or to configure an API provider. Reasoning controls follow the selected model, with Fast available for supported Codex models.
 
-The 0.3.0 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
+The 0.4.0 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
 
 The upstream documentation and upstream APK links follow below. [Integration notes in Chinese](README.zh-CN.md#多-agent-整合分支)
 
@@ -238,14 +238,14 @@ We don't police other people's choices. But this project does not provide shared
 ## Build
 
 ```sh
-sh scripts/build.sh                 # javac → d8 → aapt2 → sign, produces dist/cccodroid.apk (targetSdk 28)
+sh scripts/build.sh                 # Gradle → sign, produces dist/cccodroid-multi-agent.apk (targetSdk 28)
 TARGET_SDK=36 sh scripts/build.sh   # the 36 build; scripts/ship.mjs builds both for a release
 node devkit/devkit.mjs build --target cc.codroid   # build the toolchain (CI can do this too)
 ```
 
 **No setup needed**: GitHub Actions builds an APK for every pull request and every push to main; download it from that run's Artifacts (see [.github/workflows/apk.yml](.github/workflows/apk.yml)). Builds from main are signed with the release key and install over the released app. Pull requests from forks are signed with a throwaway test key, so you have to uninstall the released app first; a spare device is best.
 
-To build on your own machine, install JDK 17, Node.js, the Android SDK (build-tools and a platform) and the NDK, then set the environment variables described at the top of `build.sh`. `apk.yml` is a working example. The script's default tool paths point at the author's Android tablet.
+To build on your own machine, install JDK 17, Node.js, the Android SDK (build-tools and a platform) and the NDK, then set the environment variables described at the top of `build.sh`. `apk.yml` is a working example. The Android UI builds with the Gradle 8.13 wrapper, JDK 17+, and SDK Platform/Build Tools 35. Set `ANDROID_HOME` to your SDK. On ARM build hosts, set `AAPT2` to a matching native executable. The first build downloads Material and AndroidX from Google Maven and Maven Central.
 
 Release signing certificate SHA-256: `B7:03:61:59:5D:D3:D8:D7:04:DD:21:0E:D5:96:FC:57:70:14:CE:22:72:88:4F:B6:98:0B:F6:96:23:33:8F:E0`.
 

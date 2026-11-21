@@ -14,7 +14,7 @@ import java.util.Locale;
 
 public class NativeSettingsPanel {
     public static void show(NativeHome h, String id) {
-        LinearLayout v = h.scrolling();
+        LinearLayout v = PixelUi.group(h.scrolling());
         v.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(20));
         if ("set-claude".equals(id)) showClaude(h, v);
         else if ("set-run".equals(id)) showRun(h, v);
@@ -30,13 +30,26 @@ public class NativeSettingsPanel {
     }
 
     private static Switch addSwitch(LinearLayout p, String label, boolean checked) {
-        Switch s = new Switch(p.getContext()); s.setText(label); s.setChecked(checked);
+        Switch s = new Switch(p.getContext());
+        s.setText(label);
+        s.setChecked(checked);
+        s.setTextSize(16);
+        s.setTextColor(PixelUi.color(p.getContext(), "onSurface"));
+        s.setMinHeight(Math.round(60 * p.getResources().getDisplayMetrics().density));
         p.addView(s, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return s;
     }
 
     private static EditText addInput(LinearLayout p, String hint, boolean multi) {
-        EditText e = new EditText(p.getContext()); e.setHint(hint);
+        EditText e = new EditText(p.getContext());
+        e.setHint(hint);
+        float density = p.getResources().getDisplayMetrics().density;
+        int inset = Math.round(12 * density);
+        e.setBackground(PixelUi.shape(p.getContext(), "surfaceContainerHigh", 12));
+        e.setMinHeight(Math.round(48 * density));
+        e.setPadding(inset, inset, inset, inset);
+        e.setTextColor(PixelUi.color(p.getContext(), "onSurface"));
+        e.setHintTextColor(PixelUi.color(p.getContext(), "onSurfaceVariant"));
         if (multi) { e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE); e.setMinLines(3); e.setMaxLines(6); }
         p.addView(e, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return e;
@@ -63,13 +76,12 @@ public class NativeSettingsPanel {
     }
 
     private static void showClaude(NativeHome h, LinearLayout v) {
-        h.text(v, "Claude 行为配置");
-        Switch swIdle = addSwitch(v, "空闲时自动压缩上下文 (idleCompaction)", false);
-        h.text(v, "自动压缩窗口 (autoCompactWindow, 留空默认):");
+        Switch swIdle = addSwitch(v, "空闲时自动压缩上下文", false);
+        h.text(v, "自动压缩窗口（留空使用默认值）");
         EditText etWin = addInput(v, "例如: 20000", false); etWin.setInputType(InputType.TYPE_CLASS_NUMBER);
-        h.text(v, "允许的工具 (allowedTools, 每行一个):");
+        h.text(v, "允许的工具");
         EditText etAllowed = addInput(v, "每行一个工具名称", true);
-        h.text(v, "禁用的工具 (disallowedTools, 每行一个):");
+        h.text(v, "禁用的工具");
         EditText etDisallowed = addInput(v, "每行一个工具名称", true);
         h.get("/api/settings", r -> {
             if (r == null) return;
@@ -92,10 +104,9 @@ public class NativeSettingsPanel {
     }
 
     private static void showRun(NativeHome h, LinearLayout v) {
-        h.text(v, "运行与系统管理");
-        Switch swIsland = addSwitch(v, "工作岛后台保活 (workIsland)", false);
+        Switch swIsland = addSwitch(v, "工作岛后台保活", false);
         swIsland.setOnClickListener(v1 -> h.post("/api/settings", NativeHome.json("workIsland", swIsland.isChecked()), res -> h.notice("工作岛设置已更新")));
-        Switch swMem = addSwitch(v, "内存管家 (memGuard)", false);
+        Switch swMem = addSwitch(v, "内存管家", false);
         h.text(v, "内存保护白名单包名 (换行或逗号分隔):");
         EditText etWl = addInput(v, "例如: com.tencent.mm", true);
         swMem.setOnClickListener(v1 -> {

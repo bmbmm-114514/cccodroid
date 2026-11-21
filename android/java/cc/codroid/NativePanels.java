@@ -9,6 +9,9 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Menu;
+import android.widget.ImageButton;
+import android.widget.PopupMenu;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -43,6 +46,8 @@ public final class NativePanels {
                 NativeRuntimePanel.show(h, id);
                 return;
         }
+        if (id.startsWith("ext-")) { NativeExtensionPanel.show(h); return; }
+        if ("set-workspace".equals(id)) { showWorkspaceSettings(h, h.scrolling()); return; }
         if (id.startsWith("set-")) { NativeSettingsPanel.show(h, id); return; }
         LinearLayout content = h.scrolling();
         if (id.startsWith("project_detail:")) showProjectDetail(h, content, id.substring("project_detail:".length()));
@@ -53,15 +58,15 @@ public final class NativePanels {
     }
 
     private static void showProjects(NativeHome h, LinearLayout c) {
-        LinearLayout actionRow = makeActionRow(h);
-        c.addView(actionRow);
-
-        h.button(actionRow, "新建项目", () -> createProjectDialog(h, "new"));
-        h.button(actionRow, "添加已有目录", () -> createProjectDialog(h, "dir"));
-        h.button(actionRow, "+ 克隆 Git 项目", () -> createProjectDialog(h, "git"));
-        h.button(actionRow, "刷新", () -> h.nav("projects"));
+        h.headerAction("refresh", "刷新项目列表", () -> h.nav("projects"));
+        PixelUi.row(PixelUi.group(c), "add", "添加项目", "创建文件夹、打开已有目录或克隆 Git 仓库", () ->
+                new AlertDialog.Builder(h.a).setTitle("添加项目")
+                        .setItems(new String[]{"新建空目录", "添加已有目录", "克隆 Git 项目"}, (dialog, index) ->
+                                createProjectDialog(h, new String[]{"new", "dir", "git"}[index]))
+                        .setNegativeButton("取消", null).show());
 
         TextView loading = h.text(c, "正在读取项目列表...");
+        loading.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
 
         h.get("/api/projects", res -> {
             c.removeView(loading);
@@ -70,70 +75,83 @@ public final class NativePanels {
                 arr = res.optJSONArray("items");
             }
             if (arr == null || arr.length() == 0) {
-                TextView empty = h.text(c, "当前尚无项目。点击上方按钮可新建目录或克隆远程仓库。");
-                setSecondaryStyle(empty, 14f);
+                TextView empty = h.text(c, "还没有项目");
+                empty.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
+                empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+                empty.setPadding(h.dp(16), h.dp(24), h.dp(16), h.dp(24));
                 return;
             }
 
-            paged(h, c, arr, p -> {
+            LinearLayout group = PixelUi.group(c);
+            paged(h, group, arr, p -> {
                 String pid = p.optString("id");
-                String name = p.optString("name", "未命名项目");
-                String path = p.optString("path", "");
-                String model = p.optString("model", "");
-                String perm = p.optString("perm", "");
-                String provider = p.optString("provider", "");
-                long created = p.optLong("created", 0);
-                boolean isActive = pid.equals(h.projectId);
-
-                LinearLayout card = makeCard(h, c);
-
-                LinearLayout nameRow = new LinearLayout(h.a);
-                nameRow.setOrientation(LinearLayout.HORIZONTAL);
-                nameRow.setGravity(Gravity.CENTER_VERTICAL);
-                card.addView(nameRow);
-
-                TextView tvName = new TextView(h.a);
-                tvName.setText(isActive ? ("★ " + name + " (当前活动)") : name);
-                setTitleStyle(tvName, 17f);
-                nameRow.addView(tvName, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                TextView tvPath = new TextView(h.a);
-                tvPath.setText("路径: " + path);
-                setSecondaryStyle(tvPath, 13f);
-                card.addView(tvPath);
-
-                StringBuilder meta = new StringBuilder();
-                if (!model.isEmpty()) meta.append("模型: ").append(model).append("  ");
-                if (!provider.isEmpty()) meta.append("服务商: ").append(provider).append("  ");
-                if (!perm.isEmpty()) meta.append("权限: ").append(perm).append("  ");
-                if (created > 0) meta.append("创建于: ").append(formatDate(created));
-                if (meta.length() > 0) {
-                    TextView tvMeta = new TextView(h.a);
-                    tvMeta.setText(meta.toString());
-                    setSecondaryStyle(tvMeta, 12f);
-                    card.addView(tvMeta);
+                String path = p.optString("path", "").trim();
+                String name = p.optString("name", "").trim();
+                if (name.isEmpty() || "未命名项目".equals(name)) {
+                    if (!path.isEmpty()) {
+                        int idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+                        name = (idx >= 0 && idx < path.length() - 1) ? path.substring(idx + 1) : path;
+                    }
+                }
+                if (name.isEmpty()) {
+                    name = "未命名项目";
                 }
 
-                LinearLayout btns = makeActionRow(h);
-                card.addView(btns);
+                boolean isActive = pid.equals(h.projectId);
+                String supporting;
+                if (isActive) {
+                    supporting = path.isEmpty() ? "当前项目" : ("当前项目 · " + path);
+                } else {
+                    supporting = path;
+                }
 
-                h.button(btns, isActive ? "取消选择" : "设为当前项目", () -> {
-                    h.projectId = isActive ? "" : pid;
-                    h.notice(isActive ? "已取消选择项目" : "已选择项目 " + name);
-                    h.nav("projects");
-                });
+                LinearLayout row = PixelUi.row(group, "projects", name, supporting, null);
+                row.setBackground(PixelUi.clickable(h.a, null, 12));
+                row.setFocusable(true);
+                row.setOnClickListener(v -> h.nav("project_detail:" + pid));
 
-                h.button(btns, "在此项目新建对话", () -> {
-                    h.projectId = pid;
-                    h.chatId = "";
-                    h.nav("chat");
-                });
+                final String finalName = name;
 
-                h.button(btns, "详情与指令", () -> h.nav("project_detail:" + pid));
+                ImageButton moreBtn = PixelUi.icon(h.a, "more", name + "的项目操作", null);
+                moreBtn.setOnClickListener(v -> showProjectItemMenu(h, v, pid, finalName, isActive));
 
-                h.button(btns, "删除项目", () -> confirmDeleteProject(h, pid, name));
+                LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+                btnLp.gravity = Gravity.CENTER_VERTICAL;
+                row.addView(moreBtn, btnLp);
             });
         });
+    }
+
+    private static void showProjectItemMenu(NativeHome h, View anchor, String pid, String name, boolean isActive) {
+        PopupMenu popup = new PopupMenu(h.a, anchor);
+        popup.setGravity(Gravity.END);
+
+        popup.getMenu().add(Menu.NONE, 1, 2, isActive ? "取消选择当前项目" : "设为当前项目");
+        popup.getMenu().add(Menu.NONE, 2, 3, "在此项目新建对话");
+        popup.getMenu().add(Menu.NONE, 3, 4, "删除项目");
+
+        popup.setOnMenuItemClickListener(item -> {
+            int id = item.getItemId();
+            if (id == 1) {
+                h.projectId = isActive ? "" : pid;
+                h.notice(isActive ? "已取消选择项目" : "已选择项目 " + name);
+                h.nav("projects");
+                return true;
+            } else if (id == 2) {
+                h.projectId = pid;
+                h.chatId = "";
+                h.nav("chat");
+                return true;
+            } else if (id == 3) {
+                confirmDeleteProject(h, pid, name);
+                return true;
+            }
+            return false;
+        });
+        popup.show();
     }
 
     private static void confirmDeleteProject(NativeHome h, String pid, String name) {
@@ -214,10 +232,6 @@ public final class NativePanels {
     }
 
     private static void showProjectDetail(NativeHome h, LinearLayout c, String pid) {
-        LinearLayout topNav = makeActionRow(h);
-        c.addView(topNav);
-        h.button(topNav, "← 返回项目列表", () -> h.nav("projects"));
-
         TextView loading = h.text(c, "正在读取项目详情与指令配置...");
 
         h.get("/api/projects/" + enc(pid), res -> {
@@ -487,115 +501,199 @@ public final class NativePanels {
         });
     }
 
+    private static void addSectionHeader(NativeHome h, LinearLayout parent, String title) {
+        TextView tv = new TextView(h.a);
+        tv.setText(title);
+        if (android.os.Build.VERSION.SDK_INT >= 28) tv.setAccessibilityHeading(true);
+        tv.setTextSize(14f);
+        tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        tv.setTextColor(PixelUi.color(h.a, "primary"));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(h.dp(12), h.dp(14), h.dp(12), h.dp(6));
+        tv.setLayoutParams(lp);
+        parent.addView(tv);
+    }
+
     private static void showSettings(NativeHome h, LinearLayout c) {
-        h.button(c, "接口与模型", () -> h.nav("provider"));
-        h.button(c, "界面与主题", h.chooseTheme);
-        String[][] sections = {
-            {"Claude 行为", "set-claude"}, {"后台与并行", "set-run"}, {"存储", "set-storage"},
-            {"设备与权限", "set-device"}, {"更新", "set-update"}, {"用量与耗电", "usage"},
-            {"排障", "set-trouble"}
-        };
-        for (String[] item : sections) h.button(c, item[0], () -> h.nav(item[1]));
-        TextView loading = h.text(c, "正在读取设置…");
+
+        h.setHeading("", "");
+        TextView heading = PixelUi.label(h.a, "设置", 34, "onSurface");
+        if (android.os.Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
+        heading.setPadding(h.dp(8), h.dp(12), h.dp(8), h.dp(12));
+        c.addView(heading);
+
+        addSectionHeader(h, c, "常用与界面");
+        LinearLayout g1 = PixelUi.group(c);
+        PixelUi.row(g1, "model", "接口与模型", "Claude、ChatGPT、Google 与第三方接口", () -> h.nav("provider"));
+        PixelUi.row(g1, "tune", "界面与主题", "原生安卓与经典主题", h.chooseTheme);
+        PixelUi.row(g1, "projects", "工作区与运行", "目录、并发任务与执行模式", () -> h.nav("set-workspace"));
+
+        addSectionHeader(h, c, "系统与服务");
+        LinearLayout g2 = PixelUi.group(c);
+        PixelUi.row(g2, "edit", "Claude 行为", "提示词与交互参数", () -> h.nav("set-claude"));
+        PixelUi.row(g2, "history", "后台与并行", "后台保活与内存管理", () -> h.nav("set-run"));
+        PixelUi.row(g2, "storage", "存储", "缓存与自动清理", () -> h.nav("set-storage"));
+        PixelUi.row(g2, "device", "设备与权限", "通知、语音与设备权限", () -> h.nav("set-device"));
+
+        addSectionHeader(h, c, "维护与支持");
+        LinearLayout g3 = PixelUi.group(c);
+        PixelUi.row(g3, "power", "用量与耗电", "令牌用量与电量统计", () -> h.nav("usage"));
+        PixelUi.row(g3, "check", "更新", "检查版本更新与升级说明", () -> h.nav("set-update"));
+        PixelUi.row(g3, "more", "排障", "运行日志与诊断", () -> h.nav("set-trouble"));
+    }
+
+    private static void showWorkspaceSettings(NativeHome h, LinearLayout c) {
+
+        addSectionHeader(h, c, "工作空间与调度");
+        LinearLayout gSettings = PixelUi.group(c);
+        TextView loadingSettings = new TextView(h.a);
+        loadingSettings.setText("正在读取设置…");
+        loadingSettings.setTextSize(14f);
+        loadingSettings.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
+        loadingSettings.setPadding(h.dp(16), h.dp(16), h.dp(16), h.dp(16));
+        gSettings.addView(loadingSettings);
+
+        addSectionHeader(h, c, "底层运行模式");
+        LinearLayout gExec = PixelUi.group(c);
+        TextView loadingExec = new TextView(h.a);
+        loadingExec.setText("正在读取执行模式…");
+        loadingExec.setTextSize(14f);
+        loadingExec.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
+        loadingExec.setPadding(h.dp(16), h.dp(16), h.dp(16), h.dp(16));
+        gExec.addView(loadingExec);
 
         h.get("/api/settings", res -> {
-            c.removeView(loading);
+            gSettings.removeAllViews();
 
             String ws = res.optString("workspace", "");
             int maxP = res.optInt("maxParallel", 1);
             int maxPCap = res.optInt("maxParallelCap", 8);
             String outputStyle = res.optString("outputStyle", "");
 
-            LinearLayout wsCard = makeCard(h, c);
-            TextView wsTitle = new TextView(h.a);
-            wsTitle.setText("工作空间配置");
-            setTitleStyle(wsTitle, 16f);
-            wsCard.addView(wsTitle);
-
-            h.text(wsCard, ws);
-
-            LinearLayout pCard = makeCard(h, c);
-            TextView pTitle = new TextView(h.a);
-            pTitle.setText("并发调度限制");
-            setTitleStyle(pTitle, 16f);
-            pCard.addView(pTitle);
-
-            EditText etP = makeLabeledInput(h, pCard, "最大并发任务数 (上限 " + maxPCap + ")", String.valueOf(maxP));
-            LinearLayout pBtnRow = makeActionRow(h);
-            pCard.addView(pBtnRow);
-            h.button(pBtnRow, "保存并发上限", () -> {
-                try {
-                    int val = Integer.parseInt(etP.getText().toString().trim());
-                    h.post("/api/settings", NativeHome.json("maxParallel", val), r -> {
-                        h.notice("最大并发数已更新");
-                    });
-                } catch (Exception e) {
-                    h.notice("请输入有效数字");
-                }
+            PixelUi.row(gSettings, "projects", "工作空间配置", ws.isEmpty() ? "未配置工作空间" : ws, () -> {
+                new android.app.AlertDialog.Builder(h.a)
+                        .setTitle("工作空间配置")
+                        .setMessage(ws.isEmpty() ? "当前未指定工作空间路径" : ws)
+                        .setPositiveButton("确定", null)
+                        .show();
             });
 
-            LinearLayout outCard = makeCard(h, c);
-            TextView outTitle = new TextView(h.a);
-            outTitle.setText("输出格式风格");
-            setTitleStyle(outTitle, 16f);
-            outCard.addView(outTitle);
+            String pSupporting = "最大并发任务数: " + maxP + " (上限 " + maxPCap + ")";
+            PixelUi.row(gSettings, "tune", "并发调度限制", pSupporting, () -> {
+                EditText etP = new EditText(h.a);
+                etP.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                etP.setText(String.valueOf(maxP));
+                etP.setSelection(etP.getText().length());
+                etP.setTextColor(PixelUi.color(h.a, "onSurface"));
+                etP.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 8));
+                etP.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(12));
 
-            JSONArray styles = res.optJSONArray("outputStyles");
-            h.button(outCard, "使用默认输出风格", () -> h.post("/api/settings", NativeHome.json("outputStyle", ""), r -> h.nav("settings")));
-            if (styles != null) {
-                for (int i = 0; i < styles.length(); i++) {
-                    JSONObject s = styles.optJSONObject(i);
-                    if (s == null) continue;
-                    String sid = s.optString("id");
-                    String sname = sid;
-                    boolean cur = sid.equals(outputStyle);
+                LinearLayout container = new LinearLayout(h.a);
+                container.setOrientation(LinearLayout.VERTICAL);
+                container.setPadding(h.dp(24), h.dp(16), h.dp(24), h.dp(8));
+                container.addView(etP);
 
-                    Button btn = new Button(h.a);
-                    btn.setText((cur ? "● " : "○ ") + sname);
-                    btn.setOnClickListener(v -> {
-                        h.post("/api/settings", NativeHome.json("outputStyle", sid), r -> {
-                            h.notice("输出风格已切换为: " + sname);
-                            h.nav("settings");
-                        });
-                    });
-                    outCard.addView(btn);
+                new android.app.AlertDialog.Builder(h.a)
+                        .setTitle("最大并发任务数 (上限 " + maxPCap + ")")
+                        .setView(container)
+                        .setPositiveButton("保存并发上限", (dialog, which) -> {
+                            try {
+                                int val = Integer.parseInt(etP.getText().toString().trim());
+                                if (val < 1 || val > maxPCap) {
+                                    h.notice("请输入 1 到 " + maxPCap + " 之间的数字");
+                                    return;
+                                }
+                                h.post("/api/settings", NativeHome.json("maxParallel", val), r -> {
+                                    h.notice("最大并发数已更新");
+                                    h.nav("set-workspace");
+                                });
+                            } catch (Exception e) {
+                                h.notice("请输入有效数字");
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
+
+            String curStyleName = outputStyle.isEmpty() ? "默认输出风格" : outputStyle;
+            PixelUi.row(gSettings, "edit", "输出格式风格", curStyleName, () -> {
+                JSONArray styles = res.optJSONArray("outputStyles");
+                java.util.List<String> ids = new java.util.ArrayList<>();
+                java.util.List<String> names = new java.util.ArrayList<>();
+                ids.add("");
+                names.add("使用默认输出风格");
+                int checked = outputStyle.isEmpty() ? 0 : -1;
+
+                if (styles != null) {
+                    for (int i = 0; i < styles.length(); i++) {
+                        JSONObject s = styles.optJSONObject(i);
+                        if (s == null) continue;
+                        String sid = s.optString("id");
+                        ids.add(sid);
+                        names.add(sid);
+                        if (sid.equals(outputStyle)) {
+                            checked = ids.size() - 1;
+                        }
+                    }
                 }
-            }
+
+                CharSequence[] items = names.toArray(new CharSequence[0]);
+                new android.app.AlertDialog.Builder(h.a)
+                        .setTitle("输出格式风格")
+                        .setSingleChoiceItems(items, checked, (dialog, which) -> {
+                            dialog.dismiss();
+                            String sid = ids.get(which);
+                            String sname = names.get(which);
+                            h.post("/api/settings", NativeHome.json("outputStyle", sid), r -> {
+                                h.notice(sid.isEmpty() ? "已恢复默认输出风格" : "输出风格已切换为: " + sname);
+                                h.nav("set-workspace");
+                            });
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
         });
 
-        // 执行模式切换
-        LinearLayout execCard = makeCard(h, c);
-        TextView eTitle = new TextView(h.a);
-        eTitle.setText("底层运行模式 (Exec Mode)");
-        setTitleStyle(eTitle, 16f);
-        execCard.addView(eTitle);
-
         h.get("/api/exec-mode", emRes -> {
+            gExec.removeAllViews();
+
             String active = emRes.optString("active", "direct");
             int targetSdk = emRes.optInt("targetSdk", 0);
             boolean must = emRes.optBoolean("must", false);
 
-            TextView tvEm = new TextView(h.a);
-            tvEm.setText("当前模式: " + active + "  (targetSdk: " + targetSdk + (must ? " 强制加载器模式" : "") + ")");
-            setSecondaryStyle(tvEm, 13f);
-            execCard.addView(tvEm);
+            String emSupporting = "当前模式: " + active + " (targetSdk: " + targetSdk + (must ? " 强制加载器模式" : "") + ")";
+            PixelUi.row(gExec, "tune", "底层运行模式 (Exec Mode)", emSupporting, () -> {
+                java.util.List<String> modes = new java.util.ArrayList<>();
+                String[] allModes = {"auto", "direct", "loader"};
+                for (String m : allModes) {
+                    if (must && "direct".equals(m)) continue;
+                    modes.add(m);
+                }
+                int activeIndex = modes.indexOf(active);
+                CharSequence[] items = modes.toArray(new CharSequence[0]);
 
-            LinearLayout modeRow = makeActionRow(h);
-            execCard.addView(modeRow);
-
-            String[] modes = {"auto", "direct", "loader"};
-            for (String m : modes) {
-                if (must && "direct".equals(m)) continue;
-                h.button(modeRow, "切为 " + m, () -> {
-                    confirmDialog(h.a, "切换执行模式", "切换底层执行模式并立即重启网关吗？", () -> {
-                        h.post("/api/exec-mode", NativeHome.json("mode", m, "restart", true), r -> {
-                            h.notice("已下发切换模式指令并重启网关");
-                        });
-                    });
-                });
-            }
+                new android.app.AlertDialog.Builder(h.a)
+                        .setTitle("切换底层运行模式")
+                        .setSingleChoiceItems(items, activeIndex, (dialog, which) -> {
+                            dialog.dismiss();
+                            String selectedMode = modes.get(which);
+                            new android.app.AlertDialog.Builder(h.a)
+                                    .setTitle("切换执行模式")
+                                    .setMessage("切换底层执行模式并立即重启网关吗？")
+                                    .setPositiveButton("确定", (d2, w2) -> {
+                                        h.post("/api/exec-mode", NativeHome.json("mode", selectedMode, "restart", true), r -> {
+                                            h.notice("已下发切换模式指令并重启网关");
+                                            h.nav("set-workspace");
+                                        });
+                                    })
+                                    .setNegativeButton("取消", null)
+                                    .show();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            });
         });
-
     }
 
     private static void paged(NativeHome h, LinearLayout parent, JSONArray list, Consumer<JSONObject> render) {
@@ -617,15 +715,8 @@ public final class NativePanels {
     }
 
     private static LinearLayout makeCard(NativeHome h, LinearLayout parent) {
-        LinearLayout card = new LinearLayout(h.a);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(h.dp(14), h.dp(12), h.dp(14), h.dp(12));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, h.dp(5), 0, h.dp(5));
-        card.setLayoutParams(lp);
-        setSelectable(card);
-        parent.addView(card);
+        LinearLayout card = PixelUi.group(parent);
+        card.setPadding(h.dp(16), h.dp(14), h.dp(16), h.dp(14));
         return card;
     }
 
@@ -657,14 +748,12 @@ public final class NativePanels {
     private static void setTitleStyle(TextView tv, float sp) {
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
         tv.setTypeface(Typeface.DEFAULT_BOLD);
-        int col = getThemeColor(tv.getContext(), android.R.attr.textColorPrimary);
-        if (col != 0) tv.setTextColor(col);
+        tv.setTextColor(PixelUi.color(tv.getContext(), "onSurface"));
     }
 
     private static void setSecondaryStyle(TextView tv, float sp) {
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        int col = getThemeColor(tv.getContext(), android.R.attr.textColorSecondary);
-        if (col != 0) tv.setTextColor(col);
+        tv.setTextColor(PixelUi.color(tv.getContext(), "onSurfaceVariant"));
     }
 
     private static void setSelectable(View v) {
@@ -672,17 +761,6 @@ public final class NativePanels {
         if (v.getContext().getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tv, true)) {
             v.setBackgroundResource(tv.resourceId);
         }
-    }
-
-    private static int getThemeColor(Context ctx, int attr) {
-        TypedValue tv = new TypedValue();
-        if (ctx.getTheme().resolveAttribute(attr, tv, true)) {
-            if (tv.resourceId != 0) {
-                return ctx.getResources().getColorStateList(tv.resourceId, ctx.getTheme()).getDefaultColor();
-            }
-            return tv.data;
-        }
-        return 0;
     }
 
     private static String formatDate(long ts) {

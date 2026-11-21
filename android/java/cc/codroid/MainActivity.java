@@ -391,9 +391,12 @@ public class MainActivity extends Activity {
     /** 状态栏 / 导航栏跟着界面换色；浅色时图标改深色 */
     private void applyBars(boolean dark) {
         android.view.Window w = getWindow();
-        int bg = NativeAppearance.nativeMode(this) ? NativeAppearance.resolveColor(this, android.R.attr.colorBackground, 0) : BrowserPane.pal(this, dark, "bg");
-        // 状态栏保持透明（见 edgeToEdge），只换图标深浅；安卓 11+ 导航栏也透明，页面底色透上来
-        if (android.os.Build.VERSION.SDK_INT < 30) w.setNavigationBarColor(bg);
+        if (NativeAppearance.nativeMode(this)) {
+            String role = getResources().getConfiguration().screenWidthDp >= 600 ? "surface" : "surfaceContainer";
+            w.setNavigationBarColor(PixelUi.color(this, role));
+        } else if (Build.VERSION.SDK_INT < 30) {
+            w.setNavigationBarColor(BrowserPane.pal(this, dark, "bg"));
+        }
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             int m = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                   | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
@@ -446,6 +449,7 @@ public class MainActivity extends Activity {
     @Override public void onConfigurationChanged(android.content.res.Configuration cfg) {
         super.onConfigurationChanged(cfg);
         checkNativePalette();
+        if (nativeHome != null) applyBars(systemNight());
         applyLandBars();
         pushWall();
         if (web != null) web.evaluateJavascript(guarded("Theme.system", "window.Theme&&Theme.system(" + systemNight() + ")"), null);
@@ -1728,7 +1732,6 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(true);
         int surface = NativeAppearance.resolveColor(this, android.R.attr.colorBackground, getWindow().getStatusBarColor());
         getWindow().setStatusBarColor(surface);
-        getWindow().setNavigationBarColor(surface);
         applyBars(systemNight());
         nativeHome = new NativeHome(this, () -> NativeAppearance.choose(this));
     }

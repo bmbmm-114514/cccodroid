@@ -1,6 +1,7 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.graphics.Typeface;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -50,7 +51,7 @@ public class NativeHistoryActions {
             menu.show();
         } else {
             String[] options = new String[]{"搜索 Claude 历史", "导出所有 Claude 会话", "从文件导入 Claude 会话", "查看回收站与恢复"};
-            new AlertDialog.Builder(h.a)
+            new MaterialAlertDialogBuilder(h.a)
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) {
                         searchHistory(h);
@@ -73,22 +74,10 @@ public class NativeHistoryActions {
         String title = item.optString("title", id);
         if (title == null || title.isEmpty()) title = id;
 
-        Button btn = new Button(h.a);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, h.dp(6));
-        btn.setLayoutParams(lp);
-        btn.setAllCaps(false);
-        btn.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        btn.setPadding(h.dp(12), h.dp(10), h.dp(12), h.dp(10));
-        btn.setText(title);
-
-        btn.setOnClickListener(v -> h.openSession("claude:" + id));
-
         final String finalTitle = title;
-        btn.setOnLongClickListener(v -> {
+        Runnable more = () -> {
             String[] options = new String[]{"导出此会话", "移至回收站"};
-            new AlertDialog.Builder(h.a)
+            new MaterialAlertDialogBuilder(h.a)
                 .setTitle(finalTitle)
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) {
@@ -126,10 +115,46 @@ public class NativeHistoryActions {
                     }
                 })
                 .show();
-            return true;
-        });
+        };
+        parent.addView(sessionRow(h,title,"Claude Code", () -> h.openSession("claude:"+id),more));
+    }
 
-        parent.addView(btn);
+    static View sessionRow(NativeHome h, String title, String meta, Runnable open, Runnable more) {
+        LinearLayout row = new LinearLayout(h.a);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(h.dp(72));
+        row.setPaddingRelative(h.dp(16),h.dp(8),h.dp(4),h.dp(8));
+        row.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(PixelUi.color(h.a,"surfaceContainerHigh")),
+                PixelUi.shape(h.a, "surfaceContainerLow", 16), null));
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1,-2);
+        rowLp.bottomMargin = h.dp(4);
+        row.setLayoutParams(rowLp);
+        row.setOnClickListener(v -> open.run());
+        row.setOnLongClickListener(v -> { more.run(); return true; });
+        row.setFocusable(true);
+
+        LinearLayout labels = new LinearLayout(h.a);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(h.a);
+        name.setText(title);
+        name.setMaxLines(2);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        name.setTextColor(PixelUi.color(h.a,"onSurface"));
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP,16);
+        name.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
+        labels.addView(name);
+        if (!meta.isEmpty()) {
+            TextView detail = new TextView(h.a);
+            detail.setPadding(0,h.dp(2),0,0);
+            detail.setText(meta);
+            detail.setTextSize(TypedValue.COMPLEX_UNIT_SP,13);
+            detail.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
+            labels.addView(detail);
+        }
+        row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+        row.addView(PixelUi.icon(h.a,"more","更多操作，" + title,more),new LinearLayout.LayoutParams(h.dp(48),h.dp(48)));
+        return row;
     }
 
     private static void searchHistory(NativeHome h) {
@@ -146,7 +171,7 @@ public class NativeHistoryActions {
         input.setLayoutParams(lp);
         container.addView(input);
 
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
             .setTitle("搜索 Claude 历史")
             .setView(container)
             .setPositiveButton("搜索", (dialog, which) -> {
@@ -182,7 +207,7 @@ public class NativeHistoryActions {
         listLayout.setPadding(h.dp(16), h.dp(8), h.dp(16), h.dp(16));
         scrollView.addView(listLayout);
 
-        AlertDialog dialog = new AlertDialog.Builder(h.a)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(h.a)
             .setTitle("搜索结果: " + q + " (" + total + " 条, " + ms + "ms)")
             .setView(scrollView)
             .setPositiveButton("关闭", null)
@@ -293,7 +318,7 @@ public class NativeHistoryActions {
             listLayout.setPadding(h.dp(16), h.dp(8), h.dp(16), h.dp(16));
             scrollView.addView(listLayout);
 
-            AlertDialog dialog = new AlertDialog.Builder(h.a)
+            AlertDialog dialog = new MaterialAlertDialogBuilder(h.a)
                 .setTitle("回收站 (" + items.length() + " 项，保留 " + keepDays + " 天)")
                 .setView(scrollView)
                 .setPositiveButton("全部恢复", (d, w) -> {
@@ -365,7 +390,7 @@ public class NativeHistoryActions {
                 final String itemTitle = title;
                 card.setOnClickListener(v -> {
                     String[] actions = new String[]{"恢复此会话", "彻底删除"};
-                    new AlertDialog.Builder(h.a)
+                    new MaterialAlertDialogBuilder(h.a)
                         .setTitle(itemTitle)
                         .setItems(actions, (itemDlg, which) -> {
                             if (which == 0) {

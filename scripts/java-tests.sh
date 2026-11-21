@@ -11,15 +11,16 @@ javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/PrivRules.java" "$ROOT/an
 java -cp "$OUT" cc.codroid.PrivRulesTest
 javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/KeyAttest.java" "$ROOT/android/tests/cc/codroid/KeyAttestTest.java"
 java -cp "$OUT" cc.codroid.KeyAttestTest
-# 更新说明挑版本：WhatsNew 引了安卓类，编译要 android.jar（平板 ~/.bldtools，或 ANDROID_JAR）；pick 本身不碰安卓接口
-AJAR=${ANDROID_JAR:-$HOME/.bldtools/android.jar}
+# Android host helpers use the application's compiled classes and Material/AndroidX resource IDs.
+SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
+AJAR=${ANDROID_JAR:-$SDK/platforms/android-35/android.jar}
 if [ -f "$AJAR" ]; then
-  javac -nowarn -d "$OUT" -cp "$AJAR:$(ls "$ROOT"/third_party/shizuku/*.jar | tr '\n' ':')" $(find "$ROOT/android/java" -name '*.java') "$ROOT/android/tests/cc/codroid/WhatsNewPickTest.java"
-  java -cp "$OUT:$AJAR" cc.codroid.WhatsNewPickTest
-  # 第二份稳定性报告 l 组（BUG-A01/A02/A03/A04/A05 的纯逻辑；只调基本类型判断，不碰安卓运行时）
-  javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/Stab2LHostTest.java"
-  java -cp "$OUT:$AJAR" cc.codroid.Stab2LHostTest
-  # 05-工具包重装丢组件：同一版重装时组件自己 dpkg 包清单里的文件要跟着搬（只造 MANIFEST，不碰 org.json）
-  javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/InstallerCarryTest.java"
-  java -cp "$OUT:$AJAR" cc.codroid.InstallerCarryTest
-else echo "跳过 WhatsNewPickTest（没有 android.jar）"; fi
+  sh "$ROOT/scripts/android-gradle.sh" hostClasspath
+  CP="$OUT:$AJAR:$(cat "$ROOT/android/gradle-build/host-classpath.txt")"
+  for name in WhatsNewPickTest Stab2LHostTest InstallerCarryTest; do
+    javac -nowarn -d "$OUT" -cp "$CP" "$ROOT/android/tests/cc/codroid/$name.java"
+    java -cp "$CP" "cc.codroid.$name"
+  done
+else
+  echo "跳过 Android 宿主测试（需要 Android SDK platform 35）"
+fi

@@ -29,34 +29,25 @@ public class NativeSchedulePanel {
         LinearLayout root = h.scrolling();
         root.setPadding(h.dp(14), h.dp(12), h.dp(14), h.dp(16));
 
+        LinearLayout budgetGroup = PixelUi.group(root);
+        LinearLayout budgetRow = new LinearLayout(h.a);
+        budgetRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        budgetRow.setPadding(h.dp(16), h.dp(8), h.dp(8), h.dp(8));
+        budgetGroup.addView(budgetRow);
         TextView budgetText = new TextView(h.a);
-        budgetText.setPadding(0, 0, 0, h.dp(8));
-        budgetText.setTextSize(14);
-        root.addView(budgetText);
-
-        LinearLayout topBar = new LinearLayout(h.a);
-        topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setPadding(0, 0, 0, h.dp(10));
-        root.addView(topBar);
-
-        Button newBtn = new Button(h.a);
-        newBtn.setText("+ 新建任务");
-        topBar.addView(newBtn);
-
-        Button budgetBtn = new Button(h.a);
-        budgetBtn.setText("设置预算");
-        topBar.addView(budgetBtn);
-
-        Button refreshBtn = new Button(h.a);
-        refreshBtn.setText("刷新");
-        topBar.addView(refreshBtn);
+        budgetText.setTextSize(15);
+        budgetText.setTextColor(PixelUi.color(h.a, "onSurface"));
+        budgetRow.addView(budgetText, new LinearLayout.LayoutParams(0, -2, 1f));
 
         LinearLayout missedBox = new LinearLayout(h.a);
         missedBox.setOrientation(LinearLayout.VERTICAL);
         root.addView(missedBox);
 
         EditText searchEd = new EditText(h.a);
-        searchEd.setHint("搜索任务名称或提示词...");
+        searchEd.setHint("搜索任务名称或提示词");
+        searchEd.setMinHeight(h.dp(48));
+        searchEd.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 24));
+        searchEd.setPadding(h.dp(16), 0, h.dp(16), 0);
         searchEd.setSingleLine(true);
         root.addView(searchEd);
 
@@ -93,9 +84,9 @@ public class NativeSchedulePanel {
 
         Runnable reload = () -> load(h, allTasks, runningIds, dailyBudget, budgetText, missedBox, render);
 
-        newBtn.setOnClickListener(v -> showEditDialog(h, null, reload));
-        budgetBtn.setOnClickListener(v -> showBudgetDialog(h, dailyBudget[0], reload));
-        refreshBtn.setOnClickListener(v -> reload.run());
+        h.headerAction("add", "新建任务", () -> showEditDialog(h, null, reload));
+        budgetRow.addView(PixelUi.icon(h.a, "tune", "设置预算", () -> showBudgetDialog(h, dailyBudget[0], reload)));
+        budgetRow.addView(PixelUi.icon(h.a, "refresh", "刷新任务", reload));
 
         searchEd.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int b, int c, int a) {}
@@ -125,7 +116,7 @@ public class NativeSchedulePanel {
             JSONObject bObj = res.optJSONObject("budget");
             budget[0] = bObj != null ? bObj.optDouble("daily", 0) : 0;
             double today = bObj != null ? bObj.optDouble("today", 0) : 0;
-            budgetTv.setText(String.format(Locale.getDefault(), "每日预算: $%.2f | 今日消耗: $%.2f", budget[0], today));
+            budgetTv.setText(String.format(Locale.getDefault(), "每日预算 $%.2f\n今日消耗 $%.2f", budget[0], today));
 
             missedBox.removeAllViews();
             JSONArray missed = res.optJSONArray("missed");
@@ -145,9 +136,8 @@ public class NativeSchedulePanel {
     }
 
     private static void renderTaskCard(NativeHome h, LinearLayout parent, JSONObject t, boolean isRunning, Runnable reload) {
-        LinearLayout card = new LinearLayout(h.a);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(h.dp(10), h.dp(8), h.dp(10), h.dp(8));
+        LinearLayout card = PixelUi.group(parent);
+        card.setPadding(h.dp(16), h.dp(14), h.dp(16), h.dp(14));
         card.setClickable(true);
         card.setFocusable(true);
 
@@ -156,18 +146,22 @@ public class NativeSchedulePanel {
         String status = (isRunning ? "[运行中] " : "") + (on ? "已启用" : "已暂停") + (t.optBoolean("skipNext") ? " [跳过下次]" : "");
 
         TextView title = new TextView(h.a);
-        title.setText(name + "  (" + status + ")");
+        title.setText(name);
+        title.setTextColor(PixelUi.color(h.a,"onSurface"));
+        title.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
         title.setTextSize(16);
         card.addView(title);
 
         TextView freqTv = new TextView(h.a);
-        freqTv.setText("周期: " + fmtFreq(t.optJSONObject("freq")));
+        freqTv.setText(status + " · " + fmtFreq(t.optJSONObject("freq")));
+        freqTv.setTextColor(PixelUi.color(h.a,"primary"));
         freqTv.setTextSize(13);
         card.addView(freqTv);
 
         TextView nextTv = new TextView(h.a);
         nextTv.setText("下次: " + fmtTime(t.optLong("nextAt", 0)) + " | 累计: " + t.optInt("runs", 0) + "次");
-        nextTv.setTextSize(12);
+        nextTv.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
+        nextTv.setTextSize(13);
         card.addView(nextTv);
 
         JSONObject last = t.optJSONObject("last");
@@ -178,13 +172,7 @@ public class NativeSchedulePanel {
             card.addView(lastTv);
         }
 
-        View sep = new View(h.a);
-        sep.setMinimumHeight(h.dp(1));
-        sep.setPadding(0, h.dp(4), 0, h.dp(4));
-        card.addView(sep);
-
         card.setOnClickListener(v -> showTaskActions(h, t, isRunning, reload));
-        parent.addView(card);
     }
 
     private static void showTaskActions(NativeHome h, JSONObject t, boolean isRunning, Runnable reload) {

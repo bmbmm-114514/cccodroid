@@ -1,13 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AgentNative" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:colorAccent">#90CAF9</item>
-        <item name="android:colorControlActivated">#90CAF9</item>
-        <item name="android:colorBackground">#121212</item>
-        <item name="android:windowBackground">#121212</item>
-        <item name="android:statusBarColor">#121212</item>
-        <item name="android:navigationBarColor">#121212</item>
-        <item name="android:textColorPrimary">#E3E3E3</item>
+    <style name="AgentNative" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#AAC7FF</item>
+        <item name="colorOnPrimary">#092F60</item>
+        <item name="colorPrimaryContainer">#284777</item>
+        <item name="colorOnPrimaryContainer">#D6E3FF</item>
+        <item name="colorSecondary">#BCC7DC</item>
+        <item name="colorOnSecondary">#263143</item>
+        <item name="colorSecondaryContainer">#3D475A</item>
+        <item name="colorOnSecondaryContainer">#D8E3FA</item>
+        <item name="colorSurface">#111318</item>
+        <item name="colorOnSurface">#E1E2E9</item>
+        <item name="colorOnSurfaceVariant">#C4C6D0</item>
+        <item name="colorSurfaceContainerLowest">#0C0E13</item>
+        <item name="colorSurfaceContainerLow">#191C20</item>
+        <item name="colorSurfaceContainer">#1D2024</item>
+        <item name="colorSurfaceContainerHigh">#282A2F</item>
+        <item name="colorSurfaceContainerHighest">#32353A</item>
+        <item name="colorOutline">#8E9099</item>
+        <item name="colorOutlineVariant">#43474F</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">?attr/colorPrimary</item>
+        <item name="android:colorControlActivated">?attr/colorPrimary</item>
+        <item name="android:windowBackground">?attr/colorSurface</item>
+        <item name="android:colorBackground">?attr/colorSurface</item>
+        <item name="android:colorBackgroundFloating">?attr/colorSurfaceContainerHigh</item>
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:navigationBarColor">?attr/colorSurfaceContainer</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>

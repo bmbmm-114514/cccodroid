@@ -185,7 +185,8 @@ export function signApk(inApk, outApk, extraEntries = [], keyPath, opts = {}) {
   const wantV1 = opts.v1 !== false;
   const wantV2 = opts.v2 !== false;
   const { privateKey, cert, pem } = loadKey(keyPath);
-  const entries = readZip(fs.readFileSync(inApk)).filter((e) => !e.name.startsWith("META-INF/"));
+  const signature = /^META-INF\/(?:MANIFEST\.MF|[^/]+\.(?:SF|RSA|DSA|EC)|SIG-[^/]+)$/i;
+  const entries = readZip(fs.readFileSync(inApk)).filter((e) => !signature.test(e.name));
   for (const x of extraEntries) {
     const i = entries.findIndex((e) => e.name === x.name);
     if (i >= 0) entries[i] = x; else entries.push(x);

@@ -105,9 +105,6 @@ public class NativeReferencePanel {
             ver = pi.versionName != null ? pi.versionName : String.valueOf(pi.versionCode);
         } catch (Exception ignored) {}
 
-        TextView head = h.text(root, isHelp ? "使用指南与参考" : "版本更新日志");
-        head.setTextSize(20);
-        head.setPadding(0, 0, 0, h.dp(2));
         TextView verTv = h.text(root, "当前安装应用版本: " + ver);
         verTv.setTextSize(13);
         verTv.setPadding(0, 0, 0, h.dp(8));
@@ -132,10 +129,8 @@ public class NativeReferencePanel {
         stepRow.setOrientation(LinearLayout.VERTICAL);
         root.addView(stepRow);
 
-        LinearLayout detail = new LinearLayout(h.a);
-        detail.setOrientation(LinearLayout.VERTICAL);
-        detail.setPadding(0, h.dp(10), 0, h.dp(16));
-        root.addView(detail);
+        LinearLayout detail = PixelUi.group(root);
+        detail.setPadding(h.dp(16), h.dp(16), h.dp(16), h.dp(16));
 
         ArrayAdapter<String> adapter = new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, new ArrayList<>());
         spinner.setAdapter(adapter);
@@ -148,7 +143,7 @@ public class NativeReferencePanel {
                 return;
             }
             Item it = visible.get(sel[0]);
-            TextView tit = h.text(detail, (isHelp ? "【章节】" : "【版本】") + it.title);
+            TextView tit = h.text(detail, it.title);
             tit.setTextSize(18);
             tit.setPadding(0, 0, 0, h.dp(4));
             if (!it.sub.isEmpty()) {
@@ -158,6 +153,8 @@ public class NativeReferencePanel {
             }
             TextView tv = new TextView(h.a);
             tv.setText(it.content);
+            tv.setTextColor(PixelUi.color(h.a, "onSurface"));
+            tv.setLinkTextColor(PixelUi.color(h.a, "primary"));
             tv.setTextSize(15);
             tv.setLineSpacing(h.dp(2), 1.15f);
             tv.setAutoLinkMask(Linkify.WEB_URLS);

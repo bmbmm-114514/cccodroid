@@ -1,0 +1,63 @@
+plugins {
+    id 'com.android.application' version '8.10.1'
+}
+
+// The shell stages the APK payload in build/lib. Gradle owns a separate output
+// tree so that Java/resource compilation and host checks can run independently.
+layout.buildDirectory.set(file('gradle-build'))
+
+android {
+    namespace 'cc.agentui'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'cc.agentui'
+        minSdk 26
+        // target 28 permits the on-device toolchain; the loader build uses 36.
+        targetSdk providers.environmentVariable('TARGET_SDK').orElse('28').get().toInteger()
+    }
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['java']
+            res.srcDirs = ['res']
+            assets.srcDirs = []
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    // The independently distributed target-28 APK uses executable private files.
+    // Google Play's submission target policy does not apply to that variant.
+    lint.disable += 'ExpiredTargetSdkVersion'
+    testOptions.unitTests.includeAndroidResources = true
+    packaging.jniLibs.useLegacyPackaging = true
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
+    implementation 'com.google.android.material:material:1.13.0'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.1.21'
+    implementation fileTree(dir: '../third_party/shizuku', include: ['*.jar'])
+}
+
+// javac/java host tests need the same resource IDs and dependency bytecode as
+// the APK. The shell packages the offline toolkits after resource linking.
+tasks.register('hostClasspath') {
+    dependsOn 'compileDebugJavaWithJavac'
+    doLast {
+        def compile = tasks.named('compileDebugJavaWithJavac').get()
+        def runtime = configurations.debugRuntimeClasspath.incoming.artifactView {
+            attributes.attribute(Attribute.of('artifactType', String), 'android-classes-jar')
+        }
+        def paths = files(compile.destinationDirectory, compile.classpath, runtime.files)
+        layout.buildDirectory.file('host-classpath.txt').get().asFile.text = paths.asPath
+    }
+}
+
+tasks.withType(Test).configureEach {
+    systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+}

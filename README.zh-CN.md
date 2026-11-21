@@ -9,11 +9,11 @@
 - 收到有效额度数据后，当前 Agent 的适用额度窗口剩余 5% 或更少时会提醒。Antigravity 使用官方 CLI 的内建 `/usage` 命令读取订阅额度，未返回有效百分比时显示未知。
 - 在已有 Claude 对话中更换 Agent 后，原聊天记录会保留在主对话里。原版和独立版安装在同一台手机时各有自己的数据目录，从原版导出、在独立版导入后即可选择旧会话。
 
-原生安卓是默认界面。Android 12 及以上使用系统莫奈配色，Android 8–11 跟随系统深浅色。「设置 → 界面与主题」可选择原版暖色、求索、逐月、构成或拾色，并保留经典界面的亮度、字体和强调色设置。两种界面之间切换也会带上当前会话和未发送的草稿。
+默认界面使用 Material 3。手机底部可以切换对话、项目、文件和设置，宽屏窗口使用侧边导航栏。Android 12 及以上使用系统莫奈配色，Android 8–11 跟随系统深浅色。「设置 → 界面与主题」可选择原版暖色、求索、逐月、构成或拾色，并保留经典界面的亮度、字体和强调色设置。两种界面之间切换也会带上当前会话和未发送的草稿。
 
-「接口与模型」列出 Claude、ChatGPT 和 Google 三种账号登录方式。Codex 和 Antigravity 的思考强度来自当前客户端的模型目录，支持优先服务的 Codex 模型也可切换 Fast。
+点聊天顶栏的当前模型，选择接口和模型后可直接在同一对话中继续输入。打开「设置 → 接口与模型」可配置账号和 API 密钥。账号区列出 Claude、ChatGPT 和 Google 三种账号登录方式。Codex 和 Antigravity 的思考强度来自当前客户端的模型目录，支持优先服务的 Codex 模型也可切换 Fast。
 
-测试版 0.3.0 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
+测试版 0.4.0 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
 
 下文保留上游 cccodroid 的介绍与原版下载链接。
 
@@ -249,14 +249,14 @@ cccodroid 免费开源，没有服务端，不提供、不代付、不转售任�
 ## 构建
 
 ```sh
-sh scripts/build.sh                 # javac → d8 → aapt2 → 签名，产出 dist/cccodroid.apk（targetSdk 28）
+sh scripts/build.sh                 # Gradle → 签名，产出 dist/cccodroid-multi-agent.apk（targetSdk 28）
 TARGET_SDK=36 sh scripts/build.sh   # 36 版；发版时 scripts/ship.mjs 两套都出
 node devkit/devkit.mjs build --target cc.codroid   # 构建开发工具包（也可由 CI 完成）
 ```
 
 **不用自己配环境**：每个 PR、每次推到 main，GitHub Actions 都会构建一个 APK，在那次运行的 Artifacts 里下载（见 [.github/workflows/apk.yml](.github/workflows/apk.yml)）。推到 main 的用正式钥匙签，能直接覆盖安装；别人仓库来的 PR 用临时测试钥匙签，要先卸载正式版才能装，建议装在测试机上。
 
-想在自己电脑上构建：装好 JDK 17、Node.js、Android SDK（build-tools、platform）和 NDK，按 `build.sh` 开头的说明设好几个环境变量即可，`apk.yml` 就是一份现成的示例。脚本默认的工具路径是作者的安卓平板。
+想在自己电脑上构建：装好 JDK 17、Node.js、Android SDK（build-tools、platform）和 NDK，按 `build.sh` 开头的说明设好几个环境变量即可，`apk.yml` 就是一份现成的示例。原生界面使用项目内的 Gradle 8.13 wrapper，要求 JDK 17 或更高版本、SDK Platform 35 和 Build Tools 35。将 `ANDROID_HOME` 指向 SDK。ARM 主机构建可通过 `AAPT2` 指定原生可执行文件。首次构建从 Google Maven 与 Maven Central 获取 Material、AndroidX 等依赖。
 
 正式版的签名证书 SHA-256：`B7:03:61:59:5D:D3:D8:D7:04:DD:21:0E:D5:96:FC:57:70:14:CE:22:72:88:4F:B6:98:0B:F6:96:23:33:8F:E0`。
 

@@ -1,6 +1,6 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
@@ -27,20 +27,18 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
-import android.widget.HorizontalScrollView;
+import android.widget.ImageButton;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -64,10 +62,9 @@ public class NativeChat {
     String bookmarkTurn;
 
     // Chat UI elements
-    private TextView titleView;
-    private TextView projectChipView;
+    private String conversationTitle, selectedModel;
+    private LinearLayout historyList;
     private TextView quotaBannerView;
-    private Button providerButton;
     private ScrollView chatScrollView;
     private LinearLayout turnsContainer;
     private LinearLayout liveRunContainer;
@@ -86,7 +83,7 @@ public class NativeChat {
 
     // Composer controls
     private EditText inputField;
-    private Button sendStopButton;
+    private ImageButton sendButton, stopButton;
     private ProgressBar sendProgress;
 
     // Cached lists from multi/state
@@ -179,149 +176,152 @@ public class NativeChat {
         h.body.removeAllViews();
         h.body.setOrientation(LinearLayout.VERTICAL);
 
-        // 1. Header Bar
-        LinearLayout headerBar = new LinearLayout(h.a);
-        headerBar.setOrientation(LinearLayout.HORIZONTAL);
-        headerBar.setGravity(Gravity.CENTER_VERTICAL);
-        headerBar.setPadding(h.dp(10), h.dp(6), h.dp(10), h.dp(6));
-        headerBar.setBackground(makeDividerDrawable(false));
-        h.body.addView(headerBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        conversationTitle = currentChatId.isEmpty() ? "新对话" : "对话";
+        selectedModel = "";
+        updateHeading();
+        h.onHeadingClick(this::showConversationActions);
+        h.headerModel("选择模型", h::quickModel);
 
-        Button sessionsBtn = createHeaderButton("会话", v -> h.nav("sessions"));
-        headerBar.addView(sessionsBtn);
-
-        LinearLayout titleArea = new LinearLayout(h.a);
-        titleArea.setOrientation(LinearLayout.VERTICAL);
-        titleArea.setPadding(h.dp(8), 0, h.dp(8), 0);
-        titleArea.setClickable(true);
-        titleArea.setOnClickListener(v -> {
-            if (!currentChatId.isEmpty()) {
-                String curTitle = titleView != null ? titleView.getText().toString() : "";
-                showRenameDialog(currentChatId, curTitle);
-            }
-        });
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
-        headerBar.addView(titleArea, titleLp);
-
-        titleView = new TextView(h.a);
-        titleView.setText("新对话");
-        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        titleView.setTypeface(Typeface.DEFAULT_BOLD);
-        titleView.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-        titleView.setSingleLine(true);
-        titleArea.addView(titleView);
-
-        projectChipView = new TextView(h.a);
-        projectChipView.setText("默认项目");
-        projectChipView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        projectChipView.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
-        projectChipView.setSingleLine(true);
-        titleArea.addView(projectChipView);
-
-        projectChipView.setOnClickListener(v -> showProjectPickerDialog());
-
-        providerButton = createHeaderButton("接口与模型", v -> h.nav("provider"));
-        providerButton.setMaxWidth(h.dp(150));
-        providerButton.setSingleLine(true);
-        providerButton.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        headerBar.addView(providerButton);
-
-        // 2. Low Quota Banner (<= 5)
-        quotaBannerView = new TextView(h.a);
+        quotaBannerView = text("", 14, "onSecondaryContainer");
         quotaBannerView.setVisibility(View.GONE);
-        quotaBannerView.setPadding(h.dp(12), h.dp(6), h.dp(12), h.dp(6));
-        quotaBannerView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        quotaBannerView.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-        quotaBannerView.setBackground(makeWarningDrawable());
-        h.body.addView(quotaBannerView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        quotaBannerView.setMinHeight(h.dp(48));
+        quotaBannerView.setGravity(Gravity.CENTER_VERTICAL);
+        quotaBannerView.setPadding(h.dp(16), h.dp(8), h.dp(16), h.dp(8));
+        quotaBannerView.setBackground(PixelUi.shape(h.a, "secondaryContainer", 16));
+        LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(-1, -2);
+        bannerLp.setMargins(h.dp(16), h.dp(4), h.dp(16), 0);
+        h.body.addView(quotaBannerView, bannerLp);
 
-        // 3. Weighted ScrollView for Messages
         chatScrollView = new ScrollView(h.a);
         chatScrollView.setFillViewport(true);
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        h.body.addView(chatScrollView, scrollLp);
-
+        chatScrollView.setClipToPadding(false);
+        chatScrollView.setVerticalScrollBarEnabled(false);
+        h.body.addView(chatScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
         turnsContainer = new LinearLayout(h.a);
         turnsContainer.setOrientation(LinearLayout.VERTICAL);
-        turnsContainer.setPadding(h.dp(12), h.dp(8), h.dp(12), h.dp(8));
-        chatScrollView.addView(turnsContainer, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        // Approvals container
+        turnsContainer.setPadding(h.dp(20), h.dp(12), h.dp(20), h.dp(12));
+        chatScrollView.addView(turnsContainer, new ViewGroup.LayoutParams(-1, -2));
         approvalsContainer = new LinearLayout(h.a);
         approvalsContainer.setOrientation(LinearLayout.VERTICAL);
-        approvalsContainer.setPadding(0, h.dp(4), 0, h.dp(4));
-        turnsContainer.addView(approvalsContainer);
-
-        // Live bot streaming container
         liveRunContainer = new LinearLayout(h.a);
         liveRunContainer.setOrientation(LinearLayout.VERTICAL);
         liveRunContainer.setVisibility(View.GONE);
-        liveRunContainer.setPadding(0, h.dp(4), 0, h.dp(4));
+        turnsContainer.addView(approvalsContainer);
         turnsContainer.addView(liveRunContainer);
+        if (currentChatId.isEmpty()) renderEmptyConversation();
 
-        // 4. Composer Container at bottom (Never recreated during polling)
-        LinearLayout composerContainer = new LinearLayout(h.a);
-        composerContainer.setOrientation(LinearLayout.VERTICAL);
-        composerContainer.setPadding(h.dp(8), h.dp(6), h.dp(8), h.dp(8));
-        composerContainer.setBackground(makeDividerDrawable(true));
-        h.body.addView(composerContainer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout dock = new LinearLayout(h.a);
+        dock.setOrientation(LinearLayout.VERTICAL);
+        dock.setPadding(h.dp(12), h.dp(4), h.dp(12), h.dp(8));
+        h.body.addView(dock, new LinearLayout.LayoutParams(-1, -2));
+        buildHandoffSection(dock);
+        LinearLayout composer = new LinearLayout(h.a);
+        composer.setGravity(Gravity.BOTTOM);
+        composer.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 28));
+        composer.setPadding(h.dp(4), h.dp(4), h.dp(4), h.dp(4));
+        dock.addView(composer, new LinearLayout.LayoutParams(-1, -2));
 
-        buildHandoffSection(composerContainer);
-
-        // Input row
-        LinearLayout inputRow = new LinearLayout(h.a);
-        inputRow.setOrientation(LinearLayout.HORIZONTAL);
-        inputRow.setGravity(Gravity.BOTTOM);
-        composerContainer.addView(inputRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        Button actions = createHeaderButton("＋", v -> NativeChatActions.show(h, v));
-        actions.setContentDescription("附件与会话操作");
-        actions.setMinWidth(h.dp(44));
-        actions.setMinimumWidth(h.dp(44));
-        inputRow.addView(actions);
+        ImageButton attach = PixelUi.icon(h.a, "add", "附件与操作", null);
+        attach.setOnClickListener(v -> NativeChatActions.show(h, v));
+        composer.addView(attach, new LinearLayout.LayoutParams(h.dp(48), h.dp(48)));
         inputField = new EditText(h.a);
-        inputField.setHint("输入消息…");
-        inputField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        inputField.setHint("输入消息");
+        inputField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         inputField.setMinLines(1);
         inputField.setMaxLines(5);
-        inputField.setPadding(h.dp(10), h.dp(8), h.dp(10), h.dp(8));
-        inputField.setBackground(makeInputDrawable());
-        inputField.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-        inputField.setHintTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
-
+        inputField.setMinHeight(h.dp(48));
+        inputField.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        inputField.setBackground(null);
+        inputField.setPadding(h.dp(4), h.dp(10), h.dp(8), h.dp(10));
+        inputField.setTextColor(PixelUi.color(h.a,"onSurface"));
+        inputField.setHintTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
         inputField.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
-            @Override public void afterTextChanged(Editable s) { saveDraft(); }
+            @Override public void afterTextChanged(Editable s) { saveDraft(); updateComposerButtons(); }
         });
+        composer.addView(inputField, new LinearLayout.LayoutParams(0, -2, 1));
 
-        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
-        inputLp.rightMargin = h.dp(6);
-        inputRow.addView(inputField, inputLp);
-
+        FrameLayout action = new FrameLayout(h.a);
+        composer.addView(action, new LinearLayout.LayoutParams(h.dp(48), h.dp(48)));
+        sendButton = composerAction("send", "发送", this::performSend);
+        stopButton = composerAction("stop", "停止", this::confirmStop);
+        action.addView(sendButton); action.addView(stopButton);
         sendProgress = new ProgressBar(h.a, null, android.R.attr.progressBarStyleSmall);
+        sendProgress.setContentDescription("正在发送");
         sendProgress.setVisibility(View.GONE);
-        inputRow.addView(sendProgress);
+        action.addView(sendProgress, new FrameLayout.LayoutParams(h.dp(24), h.dp(24), Gravity.CENTER));
+    }
 
-        sendStopButton = new Button(h.a);
-        sendStopButton.setText("发送");
-        sendStopButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        sendStopButton.setPadding(h.dp(12), h.dp(6), h.dp(12), h.dp(6));
-        sendStopButton.setOnClickListener(v -> {
-            if (isBusy) {
-                confirmStop();
-            } else {
-                performSend();
-            }
-        });
-        inputRow.addView(sendStopButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    private ImageButton composerAction(String icon, String label, Runnable action) {
+        ImageButton b = PixelUi.icon(h.a, icon, label, action);
+        boolean stop = "stop".equals(icon);
+        b.setImageTintList(android.content.res.ColorStateList.valueOf(PixelUi.color(h.a, stop ? "onPrimaryContainer" : "onPrimary")));
+        b.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(PixelUi.color(h.a,"primaryContainer")),
+                PixelUi.shape(h.a, stop ? "primaryContainer" : "primary", 24), null));
+        return b;
+    }
+
+    private TextView text(String value, int sp, String role) {
+        TextView label = new TextView(h.a);
+        label.setText(value);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        label.setTextColor(PixelUi.color(h.a, role));
+        return label;
+    }
+
+    private void updateHeading() {
+        String project = h.projectId.isEmpty() ? "" : getProjectName(h.projectId);
+        h.setHeading(conversationTitle, project);
+    }
+
+    private void showConversationActions() {
+        String[] actions = currentChatId.isEmpty()
+            ? new String[]{"历史会话", "选择项目", "接口与模型"}
+            : new String[]{"历史会话", "在项目中新建会话", "接口与模型", "新建会话", "重命名"};
+        new MaterialAlertDialogBuilder(h.a).setTitle(conversationTitle).setItems(actions,(dialog,i) -> {
+            if (i == 0) h.nav("sessions");
+            else if (i == 1) showProjectPickerDialog();
+            else if (i == 2) h.nav("provider");
+            else if (i == 3) h.showChat("");
+            else showRenameDialog(currentChatId, conversationTitle);
+        }).show();
+    }
+
+    private void renderEmptyConversation() {
+        turnsContainer.setGravity(Gravity.CENTER);
+        LinearLayout group = new LinearLayout(h.a);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setGravity(Gravity.CENTER);
+        TextView title = text("今天想开发什么？", 28, "onSurface");
+        title.setGravity(Gravity.CENTER);
+        group.addView(title);
+        LinearLayout choices = new LinearLayout(h.a);
+        choices.setGravity(Gravity.CENTER);
+        choices.setPadding(0,h.dp(16),0,0);
+        choices.addView(actionPill("选择项目", this::showProjectPickerDialog));
+        LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2,-2);
+        gap.setMarginStart(h.dp(8));
+        choices.addView(actionPill("历史会话", () -> h.nav("sessions")), gap);
+        group.addView(choices);
+        turnsContainer.addView(group, 0);
+    }
+
+    private Button actionPill(String label, Runnable action) {
+        Button b = PixelUi.button(h.a, label, action);
+        b.setMinHeight(h.dp(48));
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        return b;
     }
 
     private void buildHandoffSection(LinearLayout parent) {
         handoffSection = new LinearLayout(h.a);
         handoffSection.setOrientation(LinearLayout.VERTICAL);
         handoffSection.setVisibility(View.GONE);
-        handoffSection.setPadding(0, 0, 0, h.dp(6));
+        handoffSection.setPadding(h.dp(12), h.dp(8), h.dp(12), h.dp(12));
+        handoffSection.setBackground(PixelUi.shape(h.a,"surfaceContainer",20));
         parent.addView(handoffSection, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout modeRow = new LinearLayout(h.a);
@@ -331,7 +331,7 @@ public class NativeChat {
 
         handoffTransferLabel = new TextView(h.a);
         handoffTransferLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        handoffTransferLabel.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+        handoffTransferLabel.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
         modeRow.addView(handoffTransferLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
 
         handoffModeSpinner = new Spinner(h.a);
@@ -387,7 +387,7 @@ public class NativeChat {
         TextView manualNotice = new TextView(h.a);
         manualNotice.setText("勾选需要传递给新 Agent 的上下文回合：");
         manualNotice.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        manualNotice.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+        manualNotice.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
         handoffManualLayout.addView(manualNotice);
 
         handoffChecksContainer = new LinearLayout(h.a);
@@ -421,7 +421,7 @@ public class NativeChat {
             if (screen == h.generation && !isDestroyedOrNavigated()) handleChatStateResponse(data);
         }, error -> {
             if (screen != h.generation || isDestroyedOrNavigated()) return;
-            titleView.setText(error);
+            h.setHeading(conversationTitle, error);
             scheduleRefresh(5000);
         });
     }
@@ -463,30 +463,12 @@ public class NativeChat {
             }
         }
 
-        // Quota check
-
-
-        // Conversation parse
         JSONObject c = d.optJSONObject("conversation");
         JSONObject run = c != null ? c.optJSONObject("activeRun") : null;
         isBusy = run != null;
-
-        if (c != null) {
-            String title = c.optString("title", "对话");
-            if (titleView != null) titleView.setText(title);
-            String pId = c.optString("projectId", h.projectId);
-            h.projectId = pId;
-            if (projectChipView != null) {
-                projectChipView.setText("项目: " + getProjectName(pId));
-            }
-
-        } else {
-            if (titleView != null) titleView.setText("新对话");
-            if (projectChipView != null) {
-                projectChipView.setText("项目: " + getProjectName(h.projectId));
-            }
-
-        }
+        conversationTitle = c == null ? "新对话" : c.optString("title", "对话");
+        if (c != null) h.projectId = c.optString("projectId", h.projectId);
+        updateHeading();
 
         paintConversation(c, run);
         paintHandoffControls(c);
@@ -529,6 +511,7 @@ public class NativeChat {
 
             // Clear turns but keep liveRunContainer and approvalsContainer
             turnsContainer.removeAllViews();
+            turnsContainer.setGravity(Gravity.TOP);
             turnsContainer.addView(approvalsContainer);
             turnsContainer.addView(liveRunContainer);
 
@@ -545,6 +528,7 @@ public class NativeChat {
                     turnsContainer.addView(turnView, turnsContainer.indexOfChild(approvalsContainer));
                 }
             }
+            if (run == null && (turns == null || turns.length() == 0)) renderEmptyConversation();
             updateManualHandoffCheckboxes();
         }
 
@@ -569,22 +553,23 @@ public class NativeChat {
 
             String stage = run.optString("stage");
             String title = "handoff".equals(stage) ? "正在整理交接内容…" : multiName(run.optString("agent"));
-            String text = run.optString("text", "进行中…");
+            String text = run.optString("text");
+            if (text.isEmpty()) text = "正在处理…";
 
-            TextView who = new TextView(h.a);
+            TextView who = text("", 13, "primary");
             who.setText(title);
-            who.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            who.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             who.setTypeface(Typeface.DEFAULT_BOLD);
-            who.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
+
             liveRunContainer.addView(who);
 
             TextView bubble = new TextView(h.a);
             bubble.setText(renderMarkdown(text));
             bubble.setMovementMethod(LinkMovementMethod.getInstance());
-            bubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            bubble.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-            bubble.setBackground(makeBubbleDrawable(false));
-            bubble.setPadding(h.dp(10), h.dp(8), h.dp(10), h.dp(8));
+            bubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            bubble.setLineSpacing(h.dp(3),1f);
+            bubble.setTextColor(PixelUi.color(h.a,"onSurface"));
+            bubble.setPadding(0, h.dp(4), 0, 0);
             LinearLayout.LayoutParams bubbleLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             bubbleLp.topMargin = h.dp(4);
             liveRunContainer.addView(bubble, bubbleLp);
@@ -604,7 +589,7 @@ public class NativeChat {
     private View buildTurnView(JSONObject turn, boolean suppressAssistant) {
         LinearLayout row = new LinearLayout(h.a);
         row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(0, h.dp(6), 0, h.dp(6));
+        row.setPadding(0, h.dp(8), 0, h.dp(12));
         row.setTag(turn.optString("id"));
 
         // User bubble
@@ -618,10 +603,11 @@ public class NativeChat {
             userBubble.setText(renderMarkdown(userText));
             turnActions(userBubble, turn, "user");
             userBubble.setMovementMethod(LinkMovementMethod.getInstance());
-            userBubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            userBubble.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-            userBubble.setBackground(makeBubbleDrawable(true));
-            userBubble.setPadding(h.dp(10), h.dp(8), h.dp(10), h.dp(8));
+            userBubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            userBubble.setLineSpacing(h.dp(2), 1f);
+            userBubble.setTextColor(PixelUi.color(h.a,"onPrimaryContainer"));
+            userBubble.setBackground(PixelUi.shape(h.a,"primaryContainer",22));
+            userBubble.setPadding(h.dp(16), h.dp(10), h.dp(16), h.dp(10));
 
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.leftMargin = h.dp(40);
@@ -638,14 +624,13 @@ public class NativeChat {
                 LinearLayout botWrapper = new LinearLayout(h.a);
                 botWrapper.setOrientation(LinearLayout.VERTICAL);
                 LinearLayout.LayoutParams botWrapperLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                botWrapperLp.topMargin = h.dp(6);
-                botWrapperLp.rightMargin = h.dp(30);
+                botWrapperLp.topMargin = h.dp(20);
 
-                TextView who = new TextView(h.a);
+                TextView who = text("", 13, "primary");
                 who.setText(multiName(agent));
-                who.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                who.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
                 who.setTypeface(Typeface.DEFAULT_BOLD);
-                who.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+
                 botWrapper.addView(who);
 
                 if (!assistantText.isEmpty()) {
@@ -653,10 +638,10 @@ public class NativeChat {
                     botBubble.setText(renderMarkdown(assistantText));
                     turnActions(botBubble, turn, "assistant");
                     botBubble.setMovementMethod(LinkMovementMethod.getInstance());
-                    botBubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                    botBubble.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-                    botBubble.setBackground(makeBubbleDrawable(false));
-                    botBubble.setPadding(h.dp(10), h.dp(8), h.dp(10), h.dp(8));
+                    botBubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                    botBubble.setLineSpacing(h.dp(3),1f);
+                    botBubble.setTextColor(PixelUi.color(h.a,"onSurface"));
+                    botBubble.setPadding(0, h.dp(4), 0, 0);
 
                     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                     lp.topMargin = h.dp(3);
@@ -678,7 +663,7 @@ public class NativeChat {
             TextView content = new TextView(h.a);
             content.setText(modeStr + "\n" + handoff.optString("text"));
             content.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            content.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+            content.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
 
             row.addView(createCollapsible(title, content));
         }
@@ -696,14 +681,14 @@ public class NativeChat {
                 toolLabel.setText("🔧 " + tool.optString("label", "工具调用"));
                 toolLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
                 toolLabel.setTypeface(Typeface.DEFAULT_BOLD);
-                toolLabel.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
+                toolLabel.setTextColor(PixelUi.color(h.a,"onSurface"));
                 toolsLayout.addView(toolLabel);
 
                 TextView toolText = new TextView(h.a);
                 toolText.setText(tool.optString("text", ""));
                 toolText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
                 toolText.setTypeface(Typeface.MONOSPACE);
-                toolText.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+                toolText.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
                 toolsLayout.addView(toolText);
             }
             row.addView(createCollapsible("工具调用 · " + tools.length() + " 项", toolsLayout));
@@ -722,7 +707,7 @@ public class NativeChat {
             TextView errTv = new TextView(h.a);
             errTv.setText("⚠️ " + problem);
             errTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            errTv.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+            errTv.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
             errorRow.addView(errTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
 
             Button retryBtn = new Button(h.a);
@@ -762,9 +747,8 @@ public class NativeChat {
 
     private View buildApprovalItem(JSONObject app) {
         LinearLayout row = new LinearLayout(h.a);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackground(makeBoxDrawable());
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackground(PixelUi.shape(h.a,"secondaryContainer",20));
         row.setPadding(h.dp(10), h.dp(6), h.dp(10), h.dp(6));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = h.dp(4);
@@ -773,21 +757,15 @@ public class NativeChat {
         TextView label = new TextView(h.a);
         label.setText("操作授权: " + app.optString("label", "请求确认"));
         label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        label.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-        row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        label.setTextColor(PixelUi.color(h.a,"onSurface"));
+        row.addView(label, new LinearLayout.LayoutParams(-1,-2));
 
+        LinearLayout choices = new LinearLayout(h.a);
+        choices.setGravity(Gravity.END);
+        row.addView(choices);
         final String appId = app.optString("id");
-        Button allowBtn = new Button(h.a);
-        allowBtn.setText("允许");
-        allowBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        allowBtn.setOnClickListener(v -> sendApproval(appId, true));
-        row.addView(allowBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        Button denyBtn = new Button(h.a);
-        denyBtn.setText("拒绝");
-        denyBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        denyBtn.setOnClickListener(v -> sendApproval(appId, false));
-        row.addView(denyBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        choices.addView(actionPill("拒绝", () -> sendApproval(appId, false)));
+        choices.addView(actionPill("允许", () -> sendApproval(appId, true)));
 
         return row;
     }
@@ -806,8 +784,11 @@ public class NativeChat {
             if (isDestroyedOrNavigated()) return;
             String target = pref != null ? pref.optString("agent", "claude") : "claude";
             String modelName = pref.optString("model");
-            providerButton.setText(modelName.isEmpty() ? multiName(target) : modelName);
-            providerButton.setContentDescription("接口与模型，当前 " + multiName(target) + " " + modelName);
+            String next = modelName.isEmpty() ? multiName(target) : modelName;
+            if (!selectedModel.equals(next)) {
+                selectedModel = next;
+                h.headerModel(selectedModel, h::quickModel);
+            }
             checkQuotaReminder(lastState.optJSONObject("quota"), source, target);
             boolean switching = !source.isEmpty() && !isBusy && !source.equals(target);
 
@@ -849,17 +830,13 @@ public class NativeChat {
     }
 
     private void updateComposerButtons() {
-        if (sendStopButton == null) return;
-        if (isBusy) {
-            sendStopButton.setText("停止");
-            sendStopButton.setEnabled(!isSending && (currentChatId.isEmpty() || lastState != null));
-        } else {
-            sendStopButton.setText("发送");
-            sendStopButton.setEnabled(!isSending && (currentChatId.isEmpty() || lastState != null));
-        }
-        if (sendProgress != null) {
-            sendProgress.setVisibility(isSending ? View.VISIBLE : View.GONE);
-        }
+        if (sendButton == null || stopButton == null || sendProgress == null) return;
+        sendButton.setVisibility(!isBusy && !isSending ? View.VISIBLE : View.GONE);
+        stopButton.setVisibility(isBusy && !isSending ? View.VISIBLE : View.GONE);
+        sendProgress.setVisibility(isSending ? View.VISIBLE : View.GONE);
+        boolean enabled = (currentChatId.isEmpty() || lastState != null) && inputField.getText().toString().trim().length() != 0;
+        sendButton.setEnabled(enabled);
+        sendButton.setAlpha(enabled ? 1f : 0.38f);
     }
 
     // ==========================================
@@ -1015,7 +992,7 @@ public class NativeChat {
 
     private void confirmStop() {
         if (currentChatId.isEmpty()) return;
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
                 .setTitle("停止生成")
                 .setMessage("确定要中断当前 AI 回复的生成吗？")
                 .setPositiveButton("停止", (dialog, which) -> {
@@ -1036,50 +1013,25 @@ public class NativeChat {
     private void renderSessionsScreen() {
         h.body.removeAllViews();
         h.body.setOrientation(LinearLayout.VERTICAL);
-
-        // Header
-        LinearLayout headerBar = new LinearLayout(h.a);
-        headerBar.setOrientation(LinearLayout.HORIZONTAL);
-        headerBar.setGravity(Gravity.CENTER_VERTICAL);
-        headerBar.setPadding(h.dp(10), h.dp(6), h.dp(10), h.dp(6));
-        headerBar.setBackground(makeDividerDrawable(false));
-        h.body.addView(headerBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        Button backBtn = createHeaderButton("← 返回", v -> h.showChat(currentChatId));
-        headerBar.addView(backBtn);
-
-        TextView headTitle = new TextView(h.a);
-        headTitle.setText("历史会话");
-        headTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        headTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        headTitle.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-        headTitle.setPadding(h.dp(8), 0, h.dp(8), 0);
-        headerBar.addView(headTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        Button newBtn = createHeaderButton("+新建", v -> {
-            h.showChat("");
-        });
-        headerBar.addView(newBtn);
-
-        Button settingsBtn = createHeaderButton("管理", v -> NativeHistoryActions.show(h, v));
-        headerBar.addView(settingsBtn);
-
+        h.setHeading("历史会话", "");
+        h.headerAction("add","新建会话", () -> h.showChat(""));
+        h.onHeadingClick(() -> NativeHistoryActions.show(h,null));
         // List ScrollView
         ScrollView listScroll = new ScrollView(h.a);
         listScroll.setFillViewport(true);
         h.body.addView(listScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout listContainer = new LinearLayout(h.a);
-        listContainer.setOrientation(LinearLayout.VERTICAL);
-        listContainer.setPadding(h.dp(12), h.dp(8), h.dp(12), h.dp(12));
-        listScroll.addView(listContainer, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        historyList = new LinearLayout(h.a);
+        historyList.setOrientation(LinearLayout.VERTICAL);
+        historyList.setPadding(h.dp(16), h.dp(8), h.dp(16), h.dp(16));
+        listScroll.addView(historyList, new ViewGroup.LayoutParams(-1,-2));
 
         // Loading notice
         TextView loading = new TextView(h.a);
         loading.setText("正在加载会话列表…");
         loading.setPadding(h.dp(12), h.dp(20), h.dp(12), h.dp(20));
-        loading.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
-        listContainer.addView(loading);
+        loading.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
+        historyList.addView(loading);
     }
 
     private void refreshSessions() {
@@ -1091,12 +1043,17 @@ public class NativeChat {
     }
 
     private void handleSessionsResponse(JSONObject d) {
-        if (d == null || h.body.getChildCount() < 2) return;
-        View scrollView = h.body.getChildAt(1);
-        if (!(scrollView instanceof ScrollView)) return;
-        LinearLayout listContainer = (LinearLayout) ((ScrollView) scrollView).getChildAt(0);
-        if (listContainer == null) return;
+        if (d == null || historyList == null) return;
+        LinearLayout listContainer = historyList;
         listContainer.removeAllViews();
+        LinearLayout controls = new LinearLayout(h.a);
+        controls.setGravity(Gravity.END);
+        Button manage = new Button(h.a,null,android.R.attr.borderlessButtonStyle);
+        manage.setText("管理会话");
+        manage.setTextColor(PixelUi.color(h.a,"primary"));
+        manage.setOnClickListener(v -> NativeHistoryActions.show(h,v));
+        controls.addView(manage);
+        listContainer.addView(controls);
 
         JSONArray convs = d.optJSONArray("conversations");
         JSONArray legacy = d.optJSONArray("sessions");
@@ -1105,7 +1062,7 @@ public class NativeChat {
             empty.setText("暂无会话记录");
             empty.setPadding(h.dp(12), h.dp(30), h.dp(12), h.dp(30));
             empty.setGravity(Gravity.CENTER);
-            empty.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+            empty.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
             listContainer.addView(empty);
             return;
         }
@@ -1133,74 +1090,23 @@ public class NativeChat {
         final long updatedAt = item.optLong("updatedAt", 0);
         final String claudeSid = item.optString("claudeSessionId", item.optString("origin", ""));
 
-        LinearLayout card = new LinearLayout(h.a);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(makeBoxDrawable());
-        card.setPadding(h.dp(12), h.dp(10), h.dp(12), h.dp(10));
-        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardLp.bottomMargin = h.dp(8);
-        card.setLayoutParams(cardLp);
-        card.setClickable(true);
-        card.setOnClickListener(v -> h.showChat(sid));
-
-        LinearLayout topRow = new LinearLayout(h.a);
-        topRow.setOrientation(LinearLayout.HORIZONTAL);
-        topRow.setGravity(Gravity.CENTER_VERTICAL);
-        card.addView(topRow);
-
-        if (pinned) {
-            TextView pinBadge = new TextView(h.a);
-            pinBadge.setText("📌 ");
-            pinBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            topRow.addView(pinBadge);
-        }
-
-        TextView titleTv = new TextView(h.a);
-        titleTv.setText(title);
-        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        titleTv.setTypeface(Typeface.DEFAULT_BOLD);
-        titleTv.setTextColor(getThemeColor(android.R.attr.textColorPrimary, 0));
-        titleTv.setSingleLine(true);
-        topRow.addView(titleTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        // Sub row with project and date
-        LinearLayout subRow = new LinearLayout(h.a);
-        subRow.setOrientation(LinearLayout.HORIZONTAL);
-        subRow.setGravity(Gravity.CENTER_VERTICAL);
-        subRow.setPadding(0, h.dp(4), 0, 0);
-        card.addView(subRow);
-
-        String meta = (pId.isEmpty() ? "默认项目" : ("项目: " + getProjectName(pId)));
-        if (updatedAt > 0) {
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault());
-            meta += " · " + sdf.format(new Date(updatedAt));
-        }
-
-        TextView metaTv = new TextView(h.a);
-        metaTv.setText(meta);
-        metaTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        metaTv.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
-        subRow.addView(metaTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        // Actions row
-        LinearLayout actionRow = new LinearLayout(h.a);
-        actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        actionRow.setGravity(Gravity.RIGHT);
-        actionRow.setPadding(0, h.dp(4), 0, 0);
-        card.addView(actionRow);
-
-        if (!claudeSid.isEmpty()) {
-            Button originBtn = createHeaderButton("原Claude会话", v -> h.openSession(claudeSid));
-            actionRow.addView(originBtn);
-        }
-
-        Button pinBtn = createHeaderButton(pinned ? "取消置顶" : "置顶", v -> togglePin(sid, pinned));
-        actionRow.addView(pinBtn);
-
-        Button renameBtn = createHeaderButton("重命名", v -> showRenameDialog(sid, title));
-        actionRow.addView(renameBtn);
-
-        return card;
+        String meta = item.optString("activeAgent", "");
+        meta = "null".equals(meta) || meta.isEmpty() ? "" : multiName(meta);
+        if (!pId.isEmpty()) meta += (meta.isEmpty() ? "" : " · ") + getProjectName(pId);
+        if (updatedAt > 0) meta += (meta.isEmpty() ? "" : " · ") + android.text.format.DateUtils.getRelativeTimeSpanString(updatedAt);
+        if (pinned) meta = "已置顶" + (meta.isEmpty() ? "" : " · " + meta);
+        Runnable more = () -> {
+            List<String> options = new ArrayList<>();
+            options.add(pinned ? "取消置顶" : "置顶");
+            options.add("重命名");
+            if (!claudeSid.isEmpty()) options.add("打开原 Claude 会话");
+            new MaterialAlertDialogBuilder(h.a).setTitle(title).setItems(options.toArray(new String[0]), (dialog,i) -> {
+                if (i == 0) togglePin(sid,pinned);
+                else if (i == 1) showRenameDialog(sid,title);
+                else h.openSession(claudeSid);
+            }).show();
+        };
+        return NativeHistoryActions.sessionRow(h,title,meta,() -> h.showChat(sid),more);
     }
 
     // ==========================================
@@ -1213,7 +1119,7 @@ public class NativeChat {
         et.setSelection(et.getText().length());
         et.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(12));
 
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
                 .setTitle("重命名会话")
                 .setView(et)
                 .setPositiveButton("确定", (dialog, which) -> {
@@ -1250,15 +1156,16 @@ public class NativeChat {
             ids.add(p.optString("id"));
         }
 
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
                 .setTitle(currentChatId.isEmpty() ? "选择项目" : "在项目中新建会话")
                 .setItems(names.toArray(new String[0]), (dialog, which) -> {
                     String selId = ids.get(which);
                     h.projectId = selId;
                     if (!currentChatId.isEmpty()) {
                         h.showChat("");
-                    } else if (projectChipView != null) {
-                        projectChipView.setText("项目: " + getProjectName(selId));
+                    } else {
+                        h.remember();
+                        updateHeading();
                     }
                 })
                 .setNegativeButton("取消", null)
@@ -1324,70 +1231,19 @@ public class NativeChat {
     // Native Theming & Drawables
     // ==========================================
 
-    private int getThemeColor(int attr, int defaultColor) {
-        return NativeAppearance.resolveColor(h.a, attr, defaultColor);
-    }
-
-    private Button createHeaderButton(String text, View.OnClickListener action) {
-        Button b = new Button(h.a);
-        b.setText(text);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        b.setPadding(h.dp(8), h.dp(4), h.dp(8), h.dp(4));
-        b.setOnClickListener(action);
-        return b;
-    }
-
-    private GradientDrawable makeBubbleDrawable(boolean isUser) {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setCornerRadius(h.dp(12));
-        int color = isUser
-                ? getThemeColor(android.R.attr.colorAccent, getThemeColor(android.R.attr.textColorPrimary, 0))
-                : getThemeColor(android.R.attr.textColorSecondary, 0);
-        int alpha = isUser ? 0x24000000 : 0x14000000;
-        gd.setColor((color & 0x00FFFFFF) | alpha);
-        gd.setStroke(h.dp(1), (color & 0x00FFFFFF) | (isUser ? 0x48000000 : 0x24000000));
-        return gd;
-    }
-
     private GradientDrawable makeBoxDrawable() {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setCornerRadius(h.dp(8));
-        int sec = getThemeColor(android.R.attr.textColorSecondary, 0);
-        gd.setColor((sec & 0x00FFFFFF) | 0x0E000000);
-        gd.setStroke(h.dp(1), (sec & 0x00FFFFFF) | 0x22000000);
-        return gd;
+        return PixelUi.shape(h.a,"surfaceContainerLow",16);
     }
 
     private GradientDrawable makeInputDrawable() {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setCornerRadius(h.dp(8));
-        int sec = getThemeColor(android.R.attr.textColorSecondary, 0);
-        gd.setColor((sec & 0x00FFFFFF) | 0x0A000000);
-        gd.setStroke(h.dp(1), (sec & 0x00FFFFFF) | 0x33000000);
-        return gd;
-    }
-
-    private GradientDrawable makeWarningDrawable() {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setCornerRadius(h.dp(6));
-        int accent = getThemeColor(android.R.attr.colorAccent, getThemeColor(android.R.attr.textColorPrimary, 0));
-        gd.setColor((accent & 0x00FFFFFF) | 0x18000000);
-        gd.setStroke(h.dp(1), (accent & 0x00FFFFFF) | 0x44000000);
-        return gd;
-    }
-
-    private GradientDrawable makeDividerDrawable(boolean isTop) {
-        GradientDrawable gd = new GradientDrawable();
-        int sec = getThemeColor(android.R.attr.textColorSecondary, 0);
-        gd.setColor((sec & 0x00FFFFFF) | 0x06000000);
-        return gd;
+        return PixelUi.shape(h.a,"surfaceContainerHigh",12);
     }
 
     private View createCollapsible(String title, View content) {
         LinearLayout box = new LinearLayout(h.a);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackground(makeBoxDrawable());
-        box.setPadding(h.dp(8), h.dp(6), h.dp(8), h.dp(6));
+        box.setPadding(h.dp(14), h.dp(10), h.dp(14), h.dp(10));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = h.dp(4);
         box.setLayoutParams(lp);
@@ -1395,7 +1251,7 @@ public class NativeChat {
         TextView header = new TextView(h.a);
         header.setText("▶ " + title);
         header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        header.setTextColor(getThemeColor(android.R.attr.textColorSecondary, 0));
+        header.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
         header.setPadding(0, 0, 0, h.dp(2));
 
         content.setVisibility(View.GONE);
@@ -1428,9 +1284,9 @@ public class NativeChat {
         if (raw == null || raw.isEmpty()) return "";
         SpannableStringBuilder sb = new SpannableStringBuilder();
 
-        int textColor = getThemeColor(android.R.attr.textColorPrimary, 0);
-        int textSecColor = getThemeColor(android.R.attr.textColorSecondary, 0);
-        int accentColor = getThemeColor(android.R.attr.colorAccent, textColor);
+        int textColor = PixelUi.color(h.a,"onSurface");
+        int textSecColor = PixelUi.color(h.a,"onSurfaceVariant");
+        int accentColor = PixelUi.color(h.a,"primary");
 
         String[] lines = raw.split("\n", -1);
         boolean inCodeBlock = false;

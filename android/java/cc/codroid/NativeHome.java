@@ -1,7 +1,6 @@
 package cc.codroid;
 
 import android.app.AlertDialog;
-import android.content.res.Configuration;
 import android.net.Uri;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -9,7 +8,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.PopupMenu;
+import android.widget.ImageButton;
+import android.text.TextUtils;
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.navigation.NavigationBarView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -26,6 +29,12 @@ public class NativeHome {
     final LinearLayout root;
     final LinearLayout toolbar;
     final TextView titleView;
+    private final TextView subtitleView;
+    private final LinearLayout heading, tools, shell, main;
+    private final ImageButton leading;
+    private NavigationBarView navigation;
+    private boolean rail;
+    private MaterialButton modelChip;
     final LinearLayout body;
     final Runnable chooseTheme;
     final NativeChat chat;
@@ -46,73 +55,144 @@ public class NativeHome {
         this.chooseTheme = chooseTheme;
         this.chat = new NativeChat(this);
 
-        this.root = new LinearLayout(a);
-        this.root.setOrientation(LinearLayout.VERTICAL);
-        this.root.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-        this.root.setFitsSystemWindows(true);
+        root = new LinearLayout(a);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setFitsSystemWindows(true);
+        root.setBackgroundColor(PixelUi.color(a,"surface"));
+        shell = new LinearLayout(a);
+        shell.setOrientation(LinearLayout.HORIZONTAL);
+        root.addView(shell, new LinearLayout.LayoutParams(-1,0,1));
+        main = new LinearLayout(a);
+        main.setOrientation(LinearLayout.VERTICAL);
+        shell.addView(main, new LinearLayout.LayoutParams(0,-1,1));
 
-        this.toolbar = new LinearLayout(a);
-        this.toolbar.setOrientation(LinearLayout.HORIZONTAL);
-        this.toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        int hPad = isTablet() ? dp(24) : dp(16);
-        this.toolbar.setPadding(hPad, dp(4), hPad, dp(4));
+        MaterialToolbar top = new MaterialToolbar(a);
+        top.setContentInsetsRelative(0,0);
+        top.setBackgroundColor(PixelUi.color(a,"surface"));
+        top.setMinimumHeight(dp(64));
+        toolbar = new LinearLayout(a);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.setMinimumHeight(dp(64));
+        toolbar.setPaddingRelative(dp(4),dp(4),dp(12),dp(4));
+        top.addView(toolbar, new androidx.appcompat.widget.Toolbar.LayoutParams(-1,-2));
+        main.addView(top,new LinearLayout.LayoutParams(-1,-2));
 
-        TypedValue abSizeVal = new TypedValue();
-        int abHeight = dp(56);
-        if (a.getTheme().resolveAttribute(android.R.attr.actionBarSize, abSizeVal, true)) {
-            abHeight = TypedValue.complexToDimensionPixelSize(abSizeVal.data, a.getResources().getDisplayMetrics());
+        leading = PixelUi.icon(a,"menu","导航",this::leadingAction);
+        toolbar.addView(leading);
+        heading = new LinearLayout(a);
+        heading.setOrientation(LinearLayout.VERTICAL);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.setMinimumHeight(dp(48));
+        heading.setPaddingRelative(dp(8),0,dp(8),0);
+        titleView = PixelUi.label(a,"",21,"onSurface");
+        subtitleView = PixelUi.label(a,"",12,"onSurfaceVariant");
+        for (TextView line : new TextView[]{titleView,subtitleView}) {
+            line.setSingleLine(true);
+            line.setEllipsize(TextUtils.TruncateAt.END);
+            heading.addView(line);
         }
-        this.toolbar.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, abHeight));
+        toolbar.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
+        tools = new LinearLayout(a);
+        tools.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        toolbar.addView(tools,new LinearLayout.LayoutParams(-2,-2));
 
-        Button navBtn = new Button(a, null, android.R.attr.borderlessButtonStyle);
-        navBtn.setText("菜单");
-        navBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        navBtn.setOnClickListener(v -> showNavPopup(navBtn));
-        this.toolbar.addView(navBtn);
-
-        this.titleView = new TextView(a);
-        this.titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        this.titleView.setSingleLine(true);
-        this.titleView.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
-        titleLp.setMargins(dp(8), 0, dp(8), 0);
-        this.titleView.setLayoutParams(titleLp);
-        this.titleView.setText(getScreenTitle("chat"));
-        this.toolbar.addView(this.titleView);
-
-        Button settingsBtn = new Button(a, null, android.R.attr.borderlessButtonStyle);
-        settingsBtn.setText("设置");
-        settingsBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        settingsBtn.setOnClickListener(v -> nav("settings"));
-        this.toolbar.addView(settingsBtn);
-
-        View divider = new View(a);
-        int divH = Math.max(1, dp(1));
-        divider.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, divH));
-        TypedValue divColor = new TypedValue();
-        if (a.getTheme().resolveAttribute(android.R.attr.dividerHorizontal, divColor, true)) {
-            divider.setBackgroundResource(divColor.resourceId);
-        } else if (a.getTheme().resolveAttribute(android.R.attr.colorBackground, divColor, true)) {
-            divider.setBackgroundColor(divColor.data);
-        }
-
-        this.body = new LinearLayout(a);
-        this.body.setOrientation(LinearLayout.VERTICAL);
-        this.body.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
-
-        this.root.addView(this.toolbar);
-        this.root.addView(divider);
-        this.root.addView(this.body);
-
+        body = new LinearLayout(a);
+        body.setOrientation(LinearLayout.VERTICAL);
+        main.addView(body,new LinearLayout.LayoutParams(-1,0,1));
+        configureNavigation(a.getResources().getConfiguration().screenWidthDp >= 600);
+        root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
+            boolean wide = r-l >= dp(600);
+            if (!disposed && wide != rail) root.post(() -> { if (!disposed) configureNavigation(root.getWidth() >= dp(600)); });
+        });
+        root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            if (disposed || rail || navigation == null) return;
+            boolean ime;
+            if (android.os.Build.VERSION.SDK_INT >= 30 && root.getRootWindowInsets() != null) {
+                ime = root.getRootWindowInsets().isVisible(android.view.WindowInsets.Type.ime());
+            } else {
+                android.graphics.Rect visible = new android.graphics.Rect();
+                root.getWindowVisibleDisplayFrame(visible);
+                ime = root.getRootView().getHeight() - visible.bottom > dp(140);
+            }
+            navigation.setVisibility(ime ? View.GONE : View.VISIBLE);
+        });
         a.setContentView(this.root);
         chatId = a.getSharedPreferences("native-ui", 0).getString("conversation", "");
         projectId = a.getSharedPreferences("native-ui", 0).getString("project", "");
         nav("chat");
+    }
+
+    private void configureNavigation(boolean wide) {
+        if (navigation != null) {
+            if (wide == rail) return;
+            ((ViewGroup)navigation.getParent()).removeView(navigation);
+        }
+        rail = wide;
+        navigation = PixelNav.make(this,wide);
+        if (wide) shell.addView(navigation,0,new LinearLayout.LayoutParams(-2,-1));
+        else root.addView(navigation,new LinearLayout.LayoutParams(-1,-2));
+    }
+
+    private boolean primary(String id) {
+        return "chat".equals(id) || "projects".equals(id) || "files".equals(id) || "settings".equals(id);
+    }
+    private void leadingAction() {
+        if (!primary(screen) && back()) return;
+        PixelNav.menu(this);
+    }
+    void setHeading(String title,String subtitle) {
+        titleView.setText(title);
+        subtitleView.setText(subtitle);
+        subtitleView.setVisibility(subtitle == null || subtitle.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+    void onHeadingClick(Runnable action) {
+        heading.setOnClickListener(action == null ? null : v -> action.run());
+        heading.setClickable(action != null);
+        heading.setFocusable(action != null);
+        heading.setBackground(action == null ? null : PixelUi.clickable(a,null,16));
+    }
+    void headerAction(String icon,String label,Runnable action) {
+        modelChip = null;
+        tools.removeAllViews();
+        if (action != null) tools.addView(PixelUi.icon(a,icon,label,action));
+    }
+    void headerModel(String label,Runnable action) {
+        if (modelChip == null) {
+            tools.removeAllViews();
+            modelChip = PixelUi.button(a,label,action);
+            modelChip.setTextSize(14);
+            modelChip.setMaxLines(1);
+            modelChip.setEllipsize(TextUtils.TruncateAt.END);
+            modelChip.setMaxWidth(dp(Math.min(200, a.getResources().getConfiguration().screenWidthDp * 47 / 100)));
+            modelChip.setMinHeight(dp(48));
+            modelChip.setIcon(PixelUi.drawable(a,"expand"));
+            modelChip.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_END);
+            modelChip.setIconSize(dp(18));
+            modelChip.setIconPadding(dp(3));
+            modelChip.setPaddingRelative(dp(14),0,dp(10),0);
+            tools.addView(modelChip,new LinearLayout.LayoutParams(-2,-2));
+        }
+        modelChip.setText(label);
+        modelChip.setContentDescription("切换模型，当前 " + label);
+    }
+    void quickModel() {
+        ProviderSettingsDialog.quick(a, () -> { if ("chat".equals(screen)) chat.refreshSelection(); });
+    }
+
+    void selectTab(String id) {
+        if (disposed || id.equals(screen)) return;
+        history.clear();
+        if (!"chat".equals(id)) history.push("chat");
+        returnTo(id);
+    }
+
+    private void returnTo(String id) {
+        isNavigatingBack = true;
+        try {
+            nav(id);
+        } finally {
+            isNavigatingBack = false;
+        }
     }
 
     public void nav(String id) {
@@ -142,7 +222,14 @@ public class NativeHome {
 
     private void renderScreen(String id) {
         if (disposed) return;
-        this.titleView.setText(getScreenTitle(id));
+        setHeading(getScreenTitle(id), "");
+        onHeadingClick(null);
+        headerAction(null,null,null);
+        boolean topLevel = primary(id);
+        leading.setImageDrawable(PixelUi.drawable(a, topLevel ? "menu" : "back"));
+        leading.setContentDescription(topLevel ? "导航" : "返回");
+        leading.setTooltipText(topLevel ? "导航" : "返回");
+        PixelNav.sync(navigation,id);
         this.body.removeAllViews();
 
         if ("chat".equals(id) || "sessions".equals(id)) {
@@ -178,12 +265,7 @@ public class NativeHome {
         while (!history.isEmpty()) {
             String prev = history.pop();
             if (prev != null && !prev.isEmpty() && !prev.equals(screen)) {
-                isNavigatingBack = true;
-                try {
-                    nav(prev);
-                } finally {
-                    isNavigatingBack = false;
-                }
+                returnTo(prev);
                 return true;
             }
         }
@@ -274,26 +356,15 @@ public class NativeHome {
 
     public void button(LinearLayout parent, String title, Runnable action) {
         if (parent == null || disposed) return;
-        Button btn = new Button(a, null, android.R.attr.buttonStyle);
-        btn.setText(title);
-        btn.setAllCaps(false);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        lp.setMargins(0, dp(4), 0, dp(4));
+        Button btn = PixelUi.button(a,title, () -> { if (action != null) action.run(); });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1,-2);
+        lp.setMargins(0, dp(2), 0, dp(2));
         btn.setLayoutParams(lp);
-        btn.setOnClickListener(v -> {
-            if (action != null) action.run();
-        });
         parent.addView(btn);
     }
 
     public TextView text(LinearLayout parent, String value) {
-        TextView tv = new TextView(a);
-        tv.setText(value);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        TextView tv = PixelUi.label(a,value,14,"onSurface");
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -372,21 +443,13 @@ public class NativeHome {
         return obj;
     }
 
-    private void showNavPopup(View anchor) {
-        if (disposed) return;
-        PopupMenu popup = new PopupMenu(a, anchor);
-        String[] screens = {"chat","sessions","projects","files","terminal","git","provider","settings","lineage","sched","bookmarks","ext","caps","usage","help","changelog"};
-        for (int i = 0; i < screens.length; i++) popup.getMenu().add(0, i, i, getScreenTitle(screens[i]));
-        popup.setOnMenuItemClickListener(item -> { nav(screens[item.getItemId()]); return true; });
-        popup.show();
-    }
-
     private String getScreenTitle(String id) {
         if (id == null) return "Codroid";
         if (id.startsWith("project_detail:")) return "项目详情";
         switch (id) {
             case "set-claude": return "Claude 行为";
             case "set-device": return "设备";
+            case "set-workspace": return "工作区与运行";
             case "set-run": return "后台运行";
             case "set-storage": return "存储";
             case "set-trouble": return "排障";
@@ -399,7 +462,7 @@ public class NativeHome {
             case "provider": return "接口与模型";
             case "git": return "Git";
             case "editor": return "编辑文件";
-            case "settings": return "系统设置";
+            case "settings": return "设置";
             case "lineage": return "会话谱系";
             case "sched": return "定时任务";
             case "bookmarks": return "书签收藏";
@@ -412,9 +475,4 @@ public class NativeHome {
         }
     }
 
-    private boolean isTablet() {
-        int screenLayout = a.getResources().getConfiguration().screenLayout;
-        int size = screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK;
-        return size >= Configuration.SCREENLAYOUT_SIZE_LARGE;
-    }
 }

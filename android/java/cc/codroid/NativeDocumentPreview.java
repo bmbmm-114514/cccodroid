@@ -152,7 +152,7 @@ public final class NativeDocumentPreview {
         tv.setPadding(padH, padV, padH, padV);
         tv.setLineSpacing(h.dp(2), 1.15f);
 
-        CharSequence formatted = renderMarkdown(source, h.dp(16));
+        CharSequence formatted = renderMarkdown(h.a, source, h.dp(16));
         tv.setText(formatted);
 
         sv.addView(tv, new ViewGroup.LayoutParams(
@@ -167,7 +167,7 @@ public final class NativeDocumentPreview {
                 .show();
     }
 
-    private static CharSequence renderMarkdown(String source, int indentUnit) {
+    private static CharSequence renderMarkdown(android.content.Context context, String source, int indentUnit) {
         if (source == null || source.isEmpty()) {
             return "";
         }
@@ -189,7 +189,7 @@ public final class NativeDocumentPreview {
                     int codeEnd = sb.length();
                     if (codeEnd > codeStart) {
                         sb.setSpan(new TypefaceSpan("monospace"), codeStart, codeEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                        sb.setSpan(new BackgroundColorSpan(0x18777777), codeStart, codeEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        sb.setSpan(new BackgroundColorSpan(PixelUi.color(context, "surfaceContainerHigh")), codeStart, codeEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                 }
                 continue;
@@ -209,7 +209,7 @@ public final class NativeDocumentPreview {
                 }
                 if (level <= 6 && level < rawLine.length() && rawLine.charAt(level) == ' ') {
                     String headingText = rawLine.substring(level + 1).trim();
-                    appendInlineFormatted(sb, headingText);
+                    appendInlineFormatted(context, sb, headingText);
                     int lineEnd = sb.length();
 
                     float scale;
@@ -230,9 +230,9 @@ public final class NativeDocumentPreview {
 
             if (rawLine.startsWith("> ") || rawLine.equals(">")) {
                 String quoteContent = rawLine.length() > 2 ? rawLine.substring(2) : "";
-                appendInlineFormatted(sb, quoteContent);
+                appendInlineFormatted(context, sb, quoteContent);
                 int lineEnd = sb.length();
-                sb.setSpan(new QuoteSpan(0xFF78909C), lineStart, lineEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sb.setSpan(new QuoteSpan(PixelUi.color(context, "primary")), lineStart, lineEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 sb.setSpan(new StyleSpan(Typeface.ITALIC), lineStart, lineEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 sb.append('\n');
                 continue;
@@ -248,7 +248,7 @@ public final class NativeDocumentPreview {
                 String displayBullet = (bullet != null && bullet.endsWith(".")) ? bullet : "•";
                 sb.append(displayBullet).append(' ');
 
-                appendInlineFormatted(sb, itemContent);
+                appendInlineFormatted(context, sb, itemContent);
                 int lineEnd = sb.length();
 
                 int margin = depth * Math.max(indentUnit, 20);
@@ -257,13 +257,13 @@ public final class NativeDocumentPreview {
                 continue;
             }
 
-            appendInlineFormatted(sb, rawLine);
+            appendInlineFormatted(context, sb, rawLine);
             sb.append('\n');
         }
 
         if (inCodeBlock && sb.length() > codeStart) {
             sb.setSpan(new TypefaceSpan("monospace"), codeStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            sb.setSpan(new BackgroundColorSpan(0x18777777), codeStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.setSpan(new BackgroundColorSpan(PixelUi.color(context, "surfaceContainerHigh")), codeStart, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
 
         if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') {
@@ -273,7 +273,7 @@ public final class NativeDocumentPreview {
         return sb;
     }
 
-    private static void appendInlineFormatted(SpannableStringBuilder sb, String text) {
+    private static void appendInlineFormatted(android.content.Context context, SpannableStringBuilder sb, String text) {
         if (text == null || text.isEmpty()) {
             return;
         }
@@ -293,14 +293,14 @@ public final class NativeDocumentPreview {
                 String url = m.group(3);
                 sb.append(label).append(" (").append(url).append(")");
                 int spanEnd = sb.length();
-                sb.setSpan(new ForegroundColorSpan(0xFF1976D2), spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sb.setSpan(new ForegroundColorSpan(PixelUi.color(context, "primary")), spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 sb.setSpan(new UnderlineSpan(), spanStart, spanStart + label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else if (m.group(4) != null) {
                 String code = m.group(5);
                 sb.append(code);
                 int spanEnd = sb.length();
                 sb.setSpan(new TypefaceSpan("monospace"), spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                sb.setSpan(new BackgroundColorSpan(0x18777777), spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sb.setSpan(new BackgroundColorSpan(PixelUi.color(context, "surfaceContainerHigh")), spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else if (m.group(6) != null) {
                 String bold = m.group(7) != null ? m.group(7) : m.group(8);
                 sb.append(bold);

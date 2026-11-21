@@ -31,19 +31,35 @@ public class NativeHooksPanel {
 
     private void init() {
         root.removeAllViews();
-        LinearLayout top = new LinearLayout(h.a);
+        LinearLayout top = PixelUi.group(root);
         top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
         scopeSpinner = new Spinner(h.a);
         scopeSpinner.setAdapter(new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, LABELS));
         top.addView(scopeSpinner, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(top);
+        top.setPadding(h.dp(8), h.dp(6), h.dp(8), h.dp(6));
 
         LinearLayout bar = new LinearLayout(h.a);
-        bar.setOrientation(LinearLayout.VERTICAL);
-        saveBtn = new Button(h.a); saveBtn.setText("保存配置");
-        pauseBtn = new Button(h.a); pauseBtn.setText("暂停/恢复");
-        Button testBtn = new Button(h.a); testBtn.setText("测试钩子");
-        bar.addView(saveBtn); bar.addView(pauseBtn); bar.addView(testBtn);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        saveBtn = new Button(h.a);
+        pauseBtn = new Button(h.a);
+        Button testBtn = new Button(h.a);
+        Button[] actions = {saveBtn, pauseBtn, testBtn};
+        String[] titles = {"保存配置", "暂停/恢复", "测试钩子"};
+        for (int i = 0; i < actions.length; i++) {
+            Button action = actions[i];
+            action.setText(titles[i]);
+            action.setMinWidth(0);
+            action.setMinimumWidth(0);
+            action.setMinHeight(h.dp(48));
+            action.setPadding(h.dp(2), h.dp(2), h.dp(2), h.dp(2));
+            action.setTextSize(14);
+            action.setStateListAnimator(null);
+            action.setBackground(PixelUi.clickable(h.a, "secondaryContainer", 20));
+            action.setTextColor(PixelUi.color(h.a, "onSecondaryContainer"));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+            lp.setMarginEnd(i < actions.length - 1 ? h.dp(4) : 0);
+            bar.addView(action, lp);
+        }
         root.addView(bar);
 
         statusText = new TextView(h.a);
@@ -53,6 +69,9 @@ public class NativeHooksPanel {
         h.text(root, "已保存的命令、地址和凭据用「保留」标记代替。保留标记会保留原值，也可直接输入新值。");
         editor = new EditText(h.a);
         editor.setMinLines(8);
+        editor.setBackground(PixelUi.shape(h.a, "surfaceContainerLow", 16));
+        editor.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(12));
+        editor.setTextColor(PixelUi.color(h.a, "onSurface"));
         editor.setSaveEnabled(false);
         editor.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         editor.setTypeface(Typeface.MONOSPACE); editor.setGravity(Gravity.TOP);

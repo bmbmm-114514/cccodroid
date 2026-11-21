@@ -1,7 +1,11 @@
 package cc.codroid;
 
 import android.app.AlertDialog;
-import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.text.TextUtils;
+import android.widget.ImageButton;
+import android.widget.PopupMenu;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
@@ -184,8 +188,10 @@ final class NativeFiles {
         // 顶部模式导航栏
         LinearLayout navBar = new LinearLayout(h.a);
         navBar.setOrientation(LinearLayout.HORIZONTAL);
-        navBar.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams navParams = new LinearLayout.LayoutParams(-1, -2);
+        navParams.setMargins(h.dp(16), h.dp(4), h.dp(16), h.dp(6));
+        navBar.setLayoutParams(navParams);
+        navBar.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 28));
         int navPad = h.dp(4);
         navBar.setPadding(navPad, navPad, navPad, navPad);
 
@@ -194,7 +200,6 @@ final class NativeFiles {
         makeTabButton(h, navBar, "Git", activeMode == MODE_GIT, () -> h.nav("git"));
         makeTabButton(h, navBar, "终端", activeMode == MODE_TERM, () -> h.nav("terminal"));
         h.body.addView(navBar);
-        addDivider(h, h.body);
 
         if (!pageError.isEmpty()) {
             h.text(h.body, pageError);
@@ -224,25 +229,22 @@ final class NativeFiles {
     // =========================================================================
 
     private void renderFilesView(NativeHome h) {
-        LinearLayout header = new LinearLayout(h.a);
-        header.setOrientation(LinearLayout.VERTICAL);
-        int pad = h.dp(8);
-        header.setPadding(pad, pad, pad, pad);
+        int m16 = h.dp(16);
+        int pad12 = h.dp(12);
 
-        TextView pathText = new TextView(h.a);
+        LinearLayout headerGroup = PixelUi.group(h.body);
+        LinearLayout.LayoutParams hgLp = (LinearLayout.LayoutParams) headerGroup.getLayoutParams();
+        hgLp.setMargins(m16, m16, m16, h.dp(8));
+        headerGroup.setLayoutParams(hgLp);
+        headerGroup.setPadding(pad12, pad12, pad12, pad12);
+        headerGroup.setOrientation(LinearLayout.HORIZONTAL);
+        headerGroup.setGravity(Gravity.CENTER_VERTICAL);
+
         String displayPath = currentDir.isEmpty() ? (projectRoot.isEmpty() ? "/" : projectRoot) : currentDir;
-        pathText.setText("当前位置: " + displayPath);
-        pathText.setTypeface(Typeface.DEFAULT_BOLD);
-        pathText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        pathText.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
-        header.addView(pathText);
-
-        LinearLayout btnRow = new LinearLayout(h.a);
-        btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        btnRow.setPadding(0, h.dp(4), 0, 0);
+        String dirBaseName = "/".equals(displayPath) ? "/" : basename(displayPath);
 
         boolean canGoUp = !currentDir.isEmpty() && !currentDir.equals("/");
-        Button upBtn = makeBtn(h, "上一级", () -> {
+        ImageButton upBtn = PixelUi.icon(h.a, "back", "上一级", () -> {
             int lastSlash = currentDir.lastIndexOf('/');
             if (lastSlash > 0) {
                 currentDir = currentDir.substring(0, lastSlash);
@@ -252,46 +254,105 @@ final class NativeFiles {
             loadFiles(h);
         });
         upBtn.setEnabled(canGoUp);
-        btnRow.addView(upBtn);
+        upBtn.setAlpha(canGoUp ? 1.0f : 0.38f);
+        headerGroup.addView(upBtn);
 
-        btnRow.addView(makeBtn(h, "新建文件", () -> promptCreate(h, false)));
-        btnRow.addView(makeBtn(h, "新建目录", () -> promptCreate(h, true)));
-        btnRow.addView(makeBtn(h, "刷新", () -> loadFiles(h)));
+        LinearLayout pathBox = new LinearLayout(h.a);
+        pathBox.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        pbLp.setMarginStart(h.dp(8));
+        pbLp.setMarginEnd(h.dp(8));
+        pathBox.setLayoutParams(pbLp);
 
-        HorizontalScrollView actions = new HorizontalScrollView(h.a);
-        btnRow.addView(makeBtn(h, "位置", () -> {
-            String[] paths = roots.toArray(new String[0]);
-            new AlertDialog.Builder(h.a).setTitle("选择位置").setItems(paths, (dialog, index) -> {
-                currentDir = paths[index]; loadFiles(h);
-            }).setNegativeButton("取消", null).show();
-        }));
-        btnRow.addView(makeBtn(h, "筛选", () -> {
-            LinearLayout box = new LinearLayout(h.a);
-            box.setOrientation(LinearLayout.VERTICAL);
-            EditText filter = new EditText(h.a);
-            filter.setSingleLine(true);
-            filter.setHint("文件名");
-            filter.setText(search);
-            CheckBox hidden = new CheckBox(h.a);
-            hidden.setText("显示隐藏文件");
-            hidden.setChecked(showHidden);
-            box.addView(filter); box.addView(hidden);
-            new AlertDialog.Builder(h.a).setTitle("筛选文件").setView(box)
-                    .setPositiveButton("应用", (d,w) -> {
-                        search = filter.getText().toString(); showHidden = hidden.isChecked(); loadFiles(h);
-                    }).setNegativeButton("取消",null).show();
-        }));
-        btnRow.addView(makeBtn(h, selecting ? "退出多选" : "多选", () -> {
-            selecting = !selecting; selectedFiles.clear(); render(h);
-        }));
-        if (selecting) btnRow.addView(makeBtn(h, "压缩选中", () -> {
-            if (selectedFiles.isEmpty()) { h.notice("先选择文件或目录"); return; }
-            NativeFileArchive.create(h, new ArrayList<>(selectedFiles), currentDir, () -> loadFiles(h));
-        }));
-        actions.addView(btnRow);
-        header.addView(actions);
-        h.body.addView(header);
-        addDivider(h, h.body);
+        TextView titleTv = new TextView(h.a);
+        titleTv.setText(dirBaseName);
+        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        titleTv.setTypeface(Typeface.DEFAULT_BOLD);
+        titleTv.setTextColor(PixelUi.color(h.a, "onSurface"));
+        titleTv.setSingleLine(true);
+        titleTv.setEllipsize(TextUtils.TruncateAt.END);
+        pathBox.addView(titleTv);
+
+        TextView subPathTv = new TextView(h.a);
+        subPathTv.setText(displayPath);
+        subPathTv.setVisibility(dirBaseName.equals(displayPath) ? View.GONE : View.VISIBLE);
+        subPathTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        subPathTv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
+        subPathTv.setSingleLine(true);
+        subPathTv.setEllipsize(TextUtils.TruncateAt.START);
+        pathBox.addView(subPathTv);
+
+        headerGroup.addView(pathBox);
+
+        ImageButton overflowBtn = PixelUi.icon(h.a, "more", "更多操作", null);
+        overflowBtn.setOnClickListener(v -> {
+            PopupMenu menu = new PopupMenu(h.a, v);
+            menu.getMenu().add(0, 1, 0, "新建文件");
+            menu.getMenu().add(0, 2, 0, "新建目录");
+            menu.getMenu().add(0, 3, 0, "刷新");
+            menu.getMenu().add(0, 4, 0, "位置");
+            menu.getMenu().add(0, 5, 0, "筛选");
+            menu.getMenu().add(0, 6, 0, selecting ? "退出多选" : "多选");
+            if (selecting) {
+                menu.getMenu().add(0, 7, 0, "压缩选中");
+            }
+            menu.setOnMenuItemClickListener(mi -> {
+                switch (mi.getItemId()) {
+                    case 1:
+                        promptCreate(h, false);
+                        return true;
+                    case 2:
+                        promptCreate(h, true);
+                        return true;
+                    case 3:
+                        loadFiles(h);
+                        return true;
+                    case 4:
+                        String[] paths = roots.toArray(new String[0]);
+                        new AlertDialog.Builder(h.a).setTitle("选择位置").setItems(paths, (dialog, index) -> {
+                            currentDir = paths[index];
+                            loadFiles(h);
+                        }).setNegativeButton("取消", null).show();
+                        return true;
+                    case 5:
+                        LinearLayout box = new LinearLayout(h.a);
+                        box.setOrientation(LinearLayout.VERTICAL);
+                        box.setPadding(m16, h.dp(8), m16, 0);
+                        EditText filter = new EditText(h.a);
+                        filter.setSingleLine(true);
+                        filter.setHint("文件名");
+                        filter.setText(search);
+                        CheckBox hidden = new CheckBox(h.a);
+                        hidden.setText("显示隐藏文件");
+                        hidden.setChecked(showHidden);
+                        box.addView(filter);
+                        box.addView(hidden);
+                        new AlertDialog.Builder(h.a).setTitle("筛选文件").setView(box)
+                                .setPositiveButton("应用", (d, w) -> {
+                                    search = filter.getText().toString();
+                                    showHidden = hidden.isChecked();
+                                    loadFiles(h);
+                                }).setNegativeButton("取消", null).show();
+                        return true;
+                    case 6:
+                        selecting = !selecting;
+                        selectedFiles.clear();
+                        render(h);
+                        return true;
+                    case 7:
+                        if (selectedFiles.isEmpty()) {
+                            h.notice("先选择文件或目录");
+                        } else {
+                            NativeFileArchive.create(h, new ArrayList<>(selectedFiles), currentDir, () -> loadFiles(h));
+                        }
+                        return true;
+                    default:
+                        return false;
+                }
+            });
+            menu.show();
+        });
+        headerGroup.addView(overflowBtn);
 
         if (filesLoading) {
             renderLoading(h, "正在读取目录列表...");
@@ -299,89 +360,127 @@ final class NativeFiles {
         }
 
         ScrollView sv = new ScrollView(h.a);
-        sv.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+        sv.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+
         LinearLayout listLayout = new LinearLayout(h.a);
         listLayout.setOrientation(LinearLayout.VERTICAL);
-        int listPad = h.dp(4);
-        listLayout.setPadding(listPad, listPad, listPad, listPad);
+        listLayout.setPadding(m16, 0, m16, m16);
 
         if (fileList.isEmpty()) {
+            LinearLayout emptyGroup = PixelUi.group(listLayout);
+            emptyGroup.setPadding(pad12, h.dp(24), pad12, h.dp(24));
+
             TextView emptyTv = new TextView(h.a);
-            emptyTv.setText("当前目录为空");
-            emptyTv.setPadding(pad, pad, pad, pad);
+            emptyTv.setText(search.isEmpty() ? "当前目录为空" : "没有匹配的文件");
             emptyTv.setGravity(Gravity.CENTER);
-            emptyTv.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
-            listLayout.addView(emptyTv);
+            emptyTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            emptyTv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
+            emptyGroup.addView(emptyTv);
         } else {
             filePage = Math.min(filePage, (fileList.size() - 1) / PAGE_SIZE);
+            LinearLayout group = PixelUi.group(listLayout);
             for (int i = filePage * PAGE_SIZE; i < Math.min(fileList.size(), (filePage + 1) * PAGE_SIZE); i++) {
                 FileItem item = fileList.get(i);
-                LinearLayout row = new LinearLayout(h.a);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(pad, pad, pad, pad);
+
+                LinearLayout itemGroup = new LinearLayout(h.a);
+                group.addView(itemGroup);
+                itemGroup.setBackground(PixelUi.clickable(h.a, null, 12));
+                itemGroup.setMinimumHeight(h.dp(64));
+                itemGroup.setOrientation(LinearLayout.HORIZONTAL);
+                itemGroup.setGravity(Gravity.CENTER_VERTICAL);
+                itemGroup.setPadding(h.dp(8), h.dp(8), h.dp(8), h.dp(8));
 
                 if (selecting) {
                     CheckBox selected = new CheckBox(h.a);
                     selected.setContentDescription("选择 " + item.name);
                     selected.setChecked(selectedFiles.contains(item.path));
-                    selected.setOnCheckedChangeListener((c,on) -> {
+                    itemGroup.setTag(selected);
+                    selected.setOnCheckedChangeListener((c, on) -> {
                         if (on) selectedFiles.add(item.path); else selectedFiles.remove(item.path);
                     });
-                    row.addView(selected);
+                    itemGroup.addView(selected);
                 }
-                TextView iconTv = new TextView(h.a);
-                iconTv.setText(item.isDir ? "[目录] " : (isImageFile(item.path, null) ? "[图片] " : "[文件] "));
-                iconTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-                iconTv.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
-                row.addView(iconTv);
 
-                LinearLayout nameBox = new LinearLayout(h.a);
-                nameBox.setOrientation(LinearLayout.VERTICAL);
-                nameBox.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+                ImageButton typeIcon = PixelUi.icon(h.a, item.isDir ? "projects" : "files", item.isDir ? "目录" : "文件", null);
+                typeIcon.setClickable(false);
+                typeIcon.setFocusable(false);
+                typeIcon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                itemGroup.addView(typeIcon);
+
+                LinearLayout contentBox = new LinearLayout(h.a);
+                contentBox.setOrientation(LinearLayout.VERTICAL);
+                contentBox.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+                contentBox.setPadding(h.dp(8), 0, h.dp(8), 0);
 
                 TextView nameTv = new TextView(h.a);
                 nameTv.setText(item.name);
-                nameTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                nameTv.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
-                nameBox.addView(nameTv);
+                nameTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                nameTv.setTextColor(PixelUi.color(h.a, "onSurface"));
+                nameTv.setSingleLine(true);
+                nameTv.setEllipsize(TextUtils.TruncateAt.END);
+                contentBox.addView(nameTv);
 
-                if (!item.isDir) {
-                    TextView infoTv = new TextView(h.a);
-                    infoTv.setText(formatSize(item.size) + "  " + formatTime(item.mtime));
-                    infoTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                    infoTv.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
-                    nameBox.addView(infoTv);
-                }
-                row.addView(nameBox);
+                TextView secondaryTv = new TextView(h.a);
+                secondaryTv.setText(item.isDir ? "文件夹" : (formatSize(item.size) + "  " + formatTime(item.mtime)));
+                secondaryTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                secondaryTv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
+                secondaryTv.setSingleLine(true);
+                secondaryTv.setEllipsize(TextUtils.TruncateAt.END);
+                contentBox.addView(secondaryTv);
 
-                row.setOnClickListener(v -> {
-                    if (item.isDir) {
+                itemGroup.addView(contentBox);
+
+                itemGroup.setOnClickListener(v -> {
+                    if (selecting) {
+                        ((CheckBox) itemGroup.getTag()).toggle();
+                    } else if (item.isDir) {
                         currentDir = item.path;
                         loadFiles(h);
                     } else {
-                        if (item.kind.equals("archive"))
-                            NativeFileArchive.open(h,item.path,currentDir,() -> loadFiles(h));
-                        else if (item.kind.matches("pdf|audio|video|office|docx|sheet"))
+                        if (item.kind.equals("archive")) {
+                            NativeFileArchive.open(h, item.path, currentDir, () -> loadFiles(h));
+                        } else if (item.kind.matches("pdf|audio|video|office|docx|sheet")) {
                             NativeFilePreview.open(h, item.path, item.kind);
-                        else openFile(h, item.path);
+                        } else {
+                            openFile(h, item.path);
+                        }
                     }
                 });
 
-                Button renBtn = makeSmallBtn(h, "重命名", () -> promptRename(h, item));
-                Button delBtn = makeSmallBtn(h, "删除", () -> promptDelete(h, item));
-                row.addView(renBtn);
-                row.addView(delBtn);
-
-                listLayout.addView(row);
-                addDivider(h, listLayout);
+                ImageButton itemOverflow = PixelUi.icon(h.a, "more", "更多操作，" + item.name, null);
+                itemOverflow.setOnClickListener(v -> showItemMenu(h, v, item));
+                itemGroup.addView(itemOverflow);
             }
         }
-        pager(h, listLayout, fileList.size(), filePage, page -> { filePage = page; render(h); });
-        if (truncated) h.text(listLayout, "目录条目较多，请筛选文件名以查看其余结果。");
+
+        pager(h, listLayout, fileList.size(), filePage, page -> {
+            filePage = page;
+            render(h);
+        });
+
+        if (truncated) {
+            h.text(listLayout, "目录条目较多，请筛选文件名以查看其余结果。");
+        }
+
         sv.addView(listLayout);
         h.body.addView(sv);
+    }
+
+    private void showItemMenu(NativeHome h, View anchor, FileItem item) {
+        PopupMenu menu = new PopupMenu(h.a, anchor);
+        menu.getMenu().add(0, 1, 0, "重命名");
+        menu.getMenu().add(0, 2, 0, "删除");
+        menu.setOnMenuItemClickListener(mi -> {
+            if (mi.getItemId() == 1) {
+                promptRename(h, item);
+                return true;
+            } else if (mi.getItemId() == 2) {
+                promptDelete(h, item);
+                return true;
+            }
+            return false;
+        });
+        menu.show();
     }
 
     private void loadFiles(NativeHome h) {
@@ -522,7 +621,7 @@ final class NativeFiles {
 
             TextView tv = new TextView(h.a);
             tv.setText("未打开任何文件，请从「文件」列表中轻触文件进行查看或编辑。");
-            tv.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
+            tv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
             tv.setGravity(Gravity.CENTER);
             emptyBox.addView(tv);
 
@@ -544,8 +643,10 @@ final class NativeFiles {
         TextView titleTv = new TextView(h.a);
         titleTv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
         titleTv.setText(basename(editingPath) + (isModified ? " *" : ""));
+        titleTv.setSingleLine(true);
+        titleTv.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         titleTv.setTypeface(Typeface.DEFAULT_BOLD);
-        titleTv.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
+        titleTv.setTextColor(PixelUi.color(h.a, "onSurface"));
         bar.addView(titleTv);
 
         if (!isImage && !editorLoading && editingPath.toLowerCase(Locale.ROOT).matches(".*\\.(md|markdown|html|htm)")) {
@@ -604,12 +705,12 @@ final class NativeFiles {
                 TextView spec = new TextView(h.a);
                 spec.setText("分辨率: " + editingBmp.getWidth() + " × " + editingBmp.getHeight());
                 spec.setPadding(0, h.dp(8), 0, 0);
-                spec.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
+                spec.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
                 imgBox.addView(spec);
             } else {
                 TextView errTv = new TextView(h.a);
                 errTv.setText("图片无法在本地解码预览");
-                errTv.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
+                errTv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
                 imgBox.addView(errTv);
             }
             imgScroll.addView(imgBox);
@@ -628,7 +729,7 @@ final class NativeFiles {
             editor.setTypeface(Typeface.MONOSPACE);
             editor.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             editor.setGravity(Gravity.TOP | Gravity.START);
-            editor.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
+            editor.setTextColor(PixelUi.color(h.a, "onSurface"));
             editor.setBackground(null);
             int edPad = h.dp(8);
             editor.setPadding(edPad, edPad, edPad, edPad);
@@ -661,7 +762,7 @@ final class NativeFiles {
             bottomInfo.setPadding(edPad, h.dp(4), edPad, h.dp(4));
             charCount.setText("字符数 " + editingText.length());
             charCount.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-            charCount.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
+            charCount.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
             bottomInfo.addView(charCount);
             h.body.addView(bottomInfo);
         }
@@ -786,7 +887,7 @@ final class NativeFiles {
         branchTv.setText("Git 当前分支: " + (gitBranch.isEmpty() ? "未知" : gitBranch));
         branchTv.setTypeface(Typeface.DEFAULT_BOLD);
         branchTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        branchTv.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
+        branchTv.setTextColor(PixelUi.color(h.a, "onSurface"));
         header.addView(branchTv);
 
         LinearLayout actRow = new LinearLayout(h.a);
@@ -797,7 +898,7 @@ final class NativeFiles {
             actRow.addView(makeBtn(h, "切换分支", () -> promptSwitchBranch(h)));
             NativeGitActions.add(h, actRow, currentDir, () -> loadGit(h));
         }
-        actRow.addView(makeBtn(h, "刷新", () -> loadGit(h)));
+        actRow.addView(PixelUi.icon(h.a, "refresh", "刷新 Git 状态", () -> loadGit(h)));
         header.addView(actRow);
 
         h.body.addView(header);
@@ -862,7 +963,7 @@ final class NativeFiles {
             cleanTv.setText("工作区非常干净，没有未提交的改动。");
             cleanTv.setGravity(Gravity.CENTER);
             cleanTv.setPadding(pad, pad, pad, pad);
-            cleanTv.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
+            cleanTv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
             filesLayout.addView(cleanTv);
         } else {
             gitPage = Math.min(gitPage, (gitFiles.size() - 1) / PAGE_SIZE);
@@ -884,13 +985,13 @@ final class NativeFiles {
                 TextView kindTv = new TextView(h.a);
                 kindTv.setText(formatGitKind(gf.kind) + " ");
                 kindTv.setTypeface(Typeface.DEFAULT_BOLD);
-                kindTv.setTextColor(themeColor(h.a, android.R.attr.colorAccent));
+                kindTv.setTextColor(PixelUi.color(h.a, "primary"));
                 row.addView(kindTv);
 
                 TextView pathTv = new TextView(h.a);
                 pathTv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
                 pathTv.setText(gf.path);
-                pathTv.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
+                pathTv.setTextColor(PixelUi.color(h.a, "onSurface"));
                 row.addView(pathTv);
 
                 Button diffBtn = makeSmallBtn(h, "差异", () -> showDiffDialog(h, gf.path));
@@ -979,7 +1080,7 @@ final class NativeFiles {
             tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             int p = h.dp(12);
             tv.setPadding(p, p, p, p);
-            tv.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
+            tv.setTextColor(PixelUi.color(h.a, "onSurface"));
             hsv.addView(tv);
             sv.addView(hsv);
             b.setView(sv);
@@ -1044,7 +1145,7 @@ final class NativeFiles {
         sessionScroll.addView(sessionBox);
         topBar.addView(sessionScroll);
 
-        Button newTermBtn = makeSmallBtn(h, "+ 新建", () -> {
+        ImageButton newTermBtn = PixelUi.icon(h.a, "add", "新建终端", () -> {
             h.post("/api/term/new", NativeHome.json("cols", termCols, "rows", termRows, "cwd", currentDir), resp -> {
                 JSONObject term = resp.optJSONObject("term");
                 if (term != null) {
@@ -1058,7 +1159,7 @@ final class NativeFiles {
         newTermBtn.setEnabled(termAvailable && !termLoading);
         topBar.addView(newTermBtn);
 
-        Button killTermBtn = makeSmallBtn(h, "结束", () -> {
+        Runnable closeTerm = () -> {
             if (activeTermId == null) return;
             new AlertDialog.Builder(h.a)
                     .setTitle("关闭终端")
@@ -1070,14 +1171,24 @@ final class NativeFiles {
                     })
                     .setNegativeButton("取消", null)
                     .show();
-        });
-        topBar.addView(killTermBtn);
+        };
 
-        Button clrBtn = makeSmallBtn(h, "清屏", () -> {
+        Runnable clearTerm = () -> {
             termOutput.reset();
             if (termTextView != null) termTextView.setText("");
+        };
+        ImageButton more = PixelUi.icon(h.a, "more", "终端操作", null);
+        more.setOnClickListener(anchor -> {
+            PopupMenu menu = new PopupMenu(h.a, anchor);
+            menu.getMenu().add(0, 1, 0, "清屏");
+            menu.getMenu().add(0, 2, 0, "结束终端").setEnabled(activeTermId != null);
+            menu.setOnMenuItemClickListener(item -> {
+                if (item.getItemId() == 1) clearTerm.run(); else closeTerm.run();
+                return true;
+            });
+            menu.show();
         });
-        topBar.addView(clrBtn);
+        topBar.addView(more);
 
         h.body.addView(topBar);
         addDivider(h, h.body);
@@ -1093,17 +1204,20 @@ final class NativeFiles {
         }
         // 终端输出滚动区域 (加权占满)
         termScrollView = new ScrollView(h.a);
-        termScrollView.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+        LinearLayout.LayoutParams outputParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        outputParams.setMargins(h.dp(12), h.dp(6), h.dp(12), 0);
+        termScrollView.setLayoutParams(outputParams);
+        termScrollView.setBackground(PixelUi.shape(h.a, "surfaceContainerLow", 16));
+        termScrollView.setClipToOutline(true);
 
         termTextView = new TextView(h.a);
         termTextView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         termTextView.setTypeface(Typeface.MONOSPACE);
-        termTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        termTextView.setTextColor(themeColor(h.a, android.R.attr.textColorPrimary));
+        termTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        termTextView.setTextColor(PixelUi.color(h.a, "onSurface"));
         termTextView.setTextIsSelectable(true);
-        int outPad = h.dp(8);
+        int outPad = h.dp(12);
         termTextView.setPadding(outPad, outPad, outPad, outPad);
         termTextView.setText(termOutput.styledText());
 
@@ -1148,7 +1262,10 @@ final class NativeFiles {
 
         final EditText cmdEdit = new EditText(h.a);
         cmdEdit.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        cmdEdit.setHint("输入终端命令...");
+        cmdEdit.setHint("输入终端命令");
+        cmdEdit.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 24));
+        cmdEdit.setMinHeight(h.dp(48));
+        cmdEdit.setPadding(h.dp(16), 0, h.dp(12), 0);
         cmdEdit.setSingleLine(true);
         cmdEdit.setImeOptions(EditorInfo.IME_ACTION_SEND);
         cmdEdit.setOnEditorActionListener((v, actionId, event) -> {
@@ -1350,76 +1467,73 @@ final class NativeFiles {
         parent.addView(row);
     }
 
-    private static int themeColor(Context c, int attr) {
-        TypedValue tv = new TypedValue();
-        if (c.getTheme().resolveAttribute(attr, tv, true)) {
-            if (tv.resourceId != 0) {
-                try { return c.getColorStateList(tv.resourceId).getDefaultColor(); }
-                catch (android.content.res.Resources.NotFoundException ignored) {}
-            }
-            return tv.data;
+    private static Button createPixelBtn(NativeHome h, String title, String bgRole, String fgRole,
+                                         int radiusDp, int padHDp, int padVDp, float sp,
+                                         int minWidthDp, Runnable act) {
+        Button b = new Button(h.a);
+        b.setText(title);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        b.setAllCaps(false);
+        b.setStateListAnimator(null);
+        b.setMinimumWidth(h.dp(minWidthDp));
+        b.setMinWidth(h.dp(minWidthDp));
+        b.setMinimumHeight(h.dp(48));
+        b.setMinHeight(h.dp(48));
+        b.setPadding(h.dp(padHDp), h.dp(padVDp), h.dp(padHDp), h.dp(padVDp));
+
+        int fg = PixelUi.color(h.a, fgRole);
+        int fgDisabled = Color.argb(97, Color.red(fg), Color.green(fg), Color.blue(fg));
+        ColorStateList textColors = new ColorStateList(
+                new int[][]{
+                        new int[]{-android.R.attr.state_enabled},
+                        new int[]{}
+                },
+                new int[]{fgDisabled, fg}
+        );
+        b.setTextColor(textColors);
+
+        b.setBackground(PixelUi.clickable(h.a, bgRole, radiusDp));
+
+        if (act != null) {
+            b.setOnClickListener(v -> act.run());
         }
-        return 0;
+        return b;
     }
 
     private static void addDivider(NativeHome h, LinearLayout parent) {
         View line = new View(h.a);
         line.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, h.dp(1))));
-        line.setBackgroundColor(themeColor(h.a, android.R.attr.dividerHorizontal));
+        line.setBackgroundColor(PixelUi.color(h.a, "outlineVariant"));
         parent.addView(line);
     }
 
     private static Button makeTabButton(NativeHome h, LinearLayout parent, String title, boolean active, Runnable act) {
-        Button b = new Button(h.a);
-        b.setText(title);
-        b.setMinimumWidth(h.dp(44));
-        b.setMinWidth(h.dp(44));
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        String bgRole = active ? "secondaryContainer" : null;
+        String fgRole = active ? "onSecondaryContainer" : "onSurfaceVariant";
+        Button b = createPixelBtn(h, title, bgRole, fgRole, 24, 4, 4, 14, 0, act);
         b.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        int p = h.dp(2);
-        b.setPadding(p, p, p, p);
+        b.setSelected(active);
+        b.setMaxLines(1);
+        b.setEllipsize(TextUtils.TruncateAt.END);
         if (active) {
             b.setTypeface(Typeface.DEFAULT_BOLD);
         }
-        b.setOnClickListener(v -> act.run());
         parent.addView(b);
         return b;
     }
 
     private static Button makeBtn(NativeHome h, String title, Runnable act) {
-        Button b = new Button(h.a);
-        b.setText(title);
-        b.setMinimumWidth(h.dp(44));
-        b.setMinWidth(h.dp(44));
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        int p = h.dp(4);
-        b.setPadding(p, p, p, p);
-        b.setOnClickListener(v -> act.run());
-        return b;
+        return createPixelBtn(h, title, "secondaryContainer", "onSecondaryContainer", 24, 14, 6, 14, 48, act);
     }
 
     private static Button makeSmallBtn(NativeHome h, String title, Runnable act) {
-        Button b = new Button(h.a);
-        b.setText(title);
-        b.setMinimumWidth(h.dp(44));
-        b.setMinWidth(h.dp(44));
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        int p = h.dp(4);
-        b.setPadding(p, p, p, p);
-        b.setOnClickListener(v -> act.run());
-        return b;
+        return createPixelBtn(h, title, "surfaceContainerHigh", "onSurfaceVariant", 18, 8, 4, 13, 48, act);
     }
 
     private static Button makeKeyBtn(NativeHome h, String title, Runnable act) {
-        Button b = new Button(h.a);
-        b.setText(title);
-        b.setMinimumWidth(h.dp(44));
-        b.setMinWidth(h.dp(44));
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        int p = h.dp(6);
-        b.setPadding(p, h.dp(2), p, h.dp(2));
-        b.setOnClickListener(v -> act.run());
+        Button b = createPixelBtn(h, title, "surfaceContainerHigh", "onSurface", 6, 6, 2, 11, 32, act);
+        b.setTypeface(Typeface.MONOSPACE);
         return b;
     }
 
@@ -1436,7 +1550,7 @@ final class NativeFiles {
         TextView tv = new TextView(h.a);
         tv.setText(tip);
         tv.setPadding(0, h.dp(8), 0, 0);
-        tv.setTextColor(themeColor(h.a, android.R.attr.textColorSecondary));
+        tv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
         box.addView(tv);
 
         h.body.addView(box);
