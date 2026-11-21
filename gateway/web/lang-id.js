@@ -3257,6 +3257,7 @@ window.I18N_DICT["id"] = {
   "原 Agent 整理": "Dipilih agen sebelumnya",
   "第三方模型整理": "Dipilih model pihak ketiga",
   "手动选择": "Pilih secara manual",
+  "所选接口将接收本对话的可见记录。": "Penyedia terpilih akan menerima riwayat yang terlihat dalam percakapan ini.",
   "所选接口将接收原会话可恢复的历史。": "Penyedia terpilih akan menerima riwayat sesi asli yang dapat dipulihkan.",
   "选择要附带的回合": "Pilih giliran yang disertakan",
   "打开授权页": "Buka halaman otorisasi",

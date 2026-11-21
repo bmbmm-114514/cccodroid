@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { activeEngine, refreshInstalledEngines } from "./multi-binary.mjs";
 import { engineUpdateStatus, requestEngineUpdate } from "./multi-engine-updates.mjs";
 import { holdMultiActivity } from "./runs.mjs";
-import { agyModels, agyState, installAgy, loginAgy, respondAgy, runAgy, stopAgyLogin } from "./multi-agy.mjs";
+import { agyModels, agyState, handoffAgy, readAgyHandoffHistory, installAgy, loginAgy, respondAgy, runAgy, stopAgyLogin } from "./multi-agy.mjs";
+import { summarizeWithProvider } from "./multi-provider-handoff.mjs";
 import { agyQuota } from "./multi-agy-quota.mjs";
 import { shutdownAgentTransports } from "./multi-rpc.mjs";
 import { checkedSelection, getChoice, saveChoice, agentFor } from "./multi-preferences.mjs";
@@ -26,6 +27,10 @@ async function requireEngine(agent) {
 }
 
 const agyAdapter = {
+  async handoff(args) {
+    if (!args.provider) return handoffAgy(args);
+    return summarizeWithProvider(args, () => readAgyHandoffHistory(args));
+  },
   async ready() {
     await requireEngine("agy");
   },

@@ -160,7 +160,13 @@ async function checkWorkbench() {
   by("chat-agent-chip").click();
   select("set-provider", "anthropic");
   by("set-x").click();
-  assert(by("ma-mode").value === "manual", "manual handoff from Google");
+  assert(by("ma-mode").value === "third-party" && !by("ma-third").classList.contains("hidden"), "Google keeps the selected third-party handoff");
+  assert(![...by("ma-mode").options].some(option => option.disabled), "all handoff modes are available from Google");
+  assert(by("ma-third-scope").textContent === window.I18N.t("所选接口将接收本对话的可见记录。"), "third-party handoff from Google explains its scope");
+  select("ma-mode", "manual");
+  assert(!by("ma-manual").classList.contains("hidden"), "Google handoff can still pick individual turns");
+  select("ma-mode", "outgoing");
+  assert(by("ma-manual").classList.contains("hidden"), "automatic handoff needs no selected turns");
   assert(!by("ma-warning").classList.contains("hidden"), "low quota");
   by("ma-dismiss").click(); by("ma-retry").click();
   await until(() => by("ma-warning").classList.contains("hidden"), "dismissed quota");
@@ -168,8 +174,8 @@ async function checkWorkbench() {
   await until(() => !by("ma-warning").classList.contains("hidden"), "new account's quota");
   simulateDrop = "after";
   compose("Start with no attachments");
-  await until(() => sent()?.text === "Start with no attachments", "manual send with no selected history");
-  assert(sent().selected.length === 0, "no automatic history attached");
+  await until(() => sent()?.text === "Start with no attachments", "automatic handoff from Google to Claude");
+  assert(sent().agent === "claude" && sent().mode === "outgoing" && sent().selected.length === 0 && !sent().provider, "Google can select context for Claude");
   await until(() => by("input").value === "", "server accepted request despite lost acknowledgement");
   await until(() => window.__cc.state.linkedClaude?.has("synthetic-ui-a"), "native ID indexed with its shared chat");
   assert(window.__cc.state.sessions.some(row => row.id === "synthetic-ui-b"), "native list preserved after import");

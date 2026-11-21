@@ -789,7 +789,7 @@ public class NativeChat {
                     ? lastState.optJSONObject("conversation").optString("activeAgent") : "";
             boolean switching = !source.isEmpty() && !source.equals(agent);
 
-            String mode = switching ? handoff.mode(source) : "manual";
+            String mode = switching ? handoff.mode() : "manual";
             body.put("mode", mode);
             body.put("selected", "manual".equals(mode) ? handoff.selected() : new JSONArray());
             if ("third-party".equals(mode)) {

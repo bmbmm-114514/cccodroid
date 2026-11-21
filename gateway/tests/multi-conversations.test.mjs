@@ -95,11 +95,32 @@ test("manual Antigravity handoff returns to a previous native session", async t 
   const { db,id,send,calls } = setup(t);
   await send("claude","plan");
   await send("agy","review",{mode:"manual",selected:[db.view(id).turns[0].id]});
-  assert.throws(()=>db.send({id,agent:"claude",text:"back",requestId:randomUUID()}),/手动/);
   await send("claude","back",{mode:"manual",selected:[db.view(id).turns.at(-1).id]});
   assert.equal(calls.at(-1).sessionId,"claude-native");
   assert.match(calls.at(-1).text,/agy reply/);
   assert.equal(calls.filter(x => x.op === "handoff").length,0);
+});
+test("one completed Antigravity turn can hand off automatically in either direction", async t => {
+  const { db, id, calls, send } = setup(t);
+  await send("agy", "remember the project constraint", { destinationModel:"gemini-main", effort:"high" });
+  await send("codex", "implement it");
+  const first = calls[1];
+  assert.equal(first.agent, "agy");
+  assert.equal(first.sessionId, "agy-native");
+  assert.equal(first.model, "gemini-main");
+  assert.equal(first.effort, "high");
+  assert.deepEqual(first.turns.map(t => t.user), ["remember the project constraint"]);
+  assert.match(calls[2].text, /agy summary/);
+  assert.doesNotMatch(calls[2].text, /remember the project constraint/);
+  await send("agy", "review");
+  assert.equal(calls.at(-1).sessionId, "agy-native");
+  await send("claude", "finish", {mode:"third-party", provider:"custom", model:"small"});
+  const delegated = calls.at(-2);
+  assert.equal(delegated.agent, "agy");
+  assert.equal(delegated.provider, "custom");
+  assert.equal(delegated.model, "small");
+  assert.deepEqual(delegated.turns.map(t => t.user), ["remember the project constraint", "review"]);
+  assert.equal(db.view(id).turns.at(-1).handoff.provider, "custom");
 });
 test("a damaged conversation is isolated; imported native history is linked only once", t => {
   const {dir,adapters,db} = setup(t);

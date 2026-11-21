@@ -100,3 +100,30 @@ test("a handoff with a stalled CLI releases on cancel", async () => {
   const timer = setTimeout(() => ac.abort(), 80);
   try { await assert.rejects(running, /停止/); } finally { clearTimeout(timer); }
 });
+
+test("Antigravity delegates only the visible history and next task to the selected provider", async t => {
+  const { summarizeWithProvider } = await import("../gw/multi-provider-handoff.mjs");
+  const params = { provider: "custom-multi-fixture", model: "my-selector", text: "review the patch" };
+  let reads = 0;
+  const history = () => { reads++; return { text: "visible agy reply", model: "gemini-original" }; };
+  const requests = t.mock.method(globalThis, "fetch", async (url, opts) => {
+    assert.equal(new URL(url).origin, "https://fixture.invalid");
+    assert.equal(new URL(url).pathname, "/v1/messages");
+    assert.equal(opts.redirect, "manual");
+    assert.ok(Object.values(opts.headers).some(v => v === "fixture" || v === "Bearer fixture"));
+    const body = JSON.parse(opts.body);
+    assert.equal(body.model, "my-selector");
+    assert.deepEqual(body.messages[0].content.map(c => c.text), ["review the patch", "visible agy reply"]);
+    assert.equal(body.tools, undefined);
+    return Response.json({ stop_reason:"end_turn", content:[{type:"thinking",thinking:"private"}, {type:"text",text:"summary"}] });
+  });
+  assert.deepEqual(await summarizeWithProvider(params, history), {text:"summary"});
+  await assert.rejects(summarizeWithProvider({...params, provider:"unknown-fixture"}, history), /已配置/);
+  await assert.rejects(summarizeWithProvider({...params, signal:AbortSignal.abort()}, history), { name:"AbortError" });
+  assert.equal(reads, 1);
+  assert.equal(requests.mock.callCount(), 1);
+  requests.mock.mockImplementation(async () => Response.json({stop_reason:"max_tokens",content:[{type:"text",text:"cut mid-sentence"}]}));
+  await assert.rejects(summarizeWithProvider(params, history), /长度上限/);
+  requests.mock.mockImplementation(async () => Response.redirect("https://other.invalid",307));
+  await assert.rejects(summarizeWithProvider(params, history), /redirect refused/);
+});

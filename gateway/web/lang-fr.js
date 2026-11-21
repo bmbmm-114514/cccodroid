@@ -3275,6 +3275,7 @@ window.I18N_DICT["fr"] = {
   "原 Agent 整理": "Choix par l’agent sortant",
   "第三方模型整理": "Choix par un modèle tiers",
   "手动选择": "Sélection manuelle",
+  "所选接口将接收本对话的可见记录。": "Le fournisseur choisi recevra l’historique visible de cette conversation.",
   "所选接口将接收原会话可恢复的历史。": "Le fournisseur choisi recevra l’historique récupérable de la session d’origine.",
   "选择要附带的回合": "Choisir les échanges à inclure",
   "打开授权页": "Ouvrir la page d’autorisation",

@@ -2,7 +2,7 @@
 
 ## Multi-agent branch
 
-This fork starts at upstream v0.7.14. Choose Claude Code, Codex, or Antigravity and its model in the main model and provider settings, then continue in the current chat. The APK includes all three clients and the base runtime for offline first-time setup. The built-in terminal exposes the same clients as `claude`, `codex`, and `agy`. Each client retains its native sign-in and session. Claude and Codex can hand work off from a native session fork using the original provider or a configured third-party model. Manual handoff sends the turns you select. Leaving Antigravity uses manual handoff.
+This fork starts at upstream v0.7.14. Choose Claude Code, Codex, or Antigravity and its model in the main model and provider settings, then continue in the current chat. The APK includes all three clients and the base runtime for offline first-time setup. The built-in terminal exposes the same clients as `claude`, `codex`, and `agy`. Each client retains its native sign-in and session. Claude and Codex can hand work off from a native session fork using the original provider or a configured third-party model. Manual handoff sends the turns you select. When leaving Antigravity, automatic handoff uses a separate Antigravity session to summarize visible messages and tool results for the next task. Choosing a third-party provider sends those records to the selected Messages-compatible endpoint. Antigravity handoff prioritizes recent history within a 64,000-character budget. The CLI keeps a separate session for its own summaries.
 
 The default Material 3 interface uses wallpaper colors on Android 12+ and a light or dark palette on older releases. The four main destinations appear at the bottom on phones and in a navigation rail on wider windows. On Android 14+ with gesture navigation, swipe from either edge to preview the previous native page. Release to go back or reverse the gesture to stay. Tap the model in the chat toolbar to choose a provider and model for the next message in the same conversation. The picker keeps its height as you browse providers. Returning from full provider settings restores the open picker. Settings retains all five classic themes. Open the full provider settings to sign into Claude, ChatGPT or Google or to configure an API provider. Reasoning controls follow the selected model, with Fast available for supported Codex models.
 
@@ -10,7 +10,7 @@ Tap the native terminal output to type directly. Two rows of extra keys provide 
 
 In Settings → Updates, check Claude Code, Codex or Antigravity individually and install the offered version. Chat and new terminal commands use the same installed client.
 
-The 0.4.6 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
+The 0.4.7 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
 
 The upstream documentation and upstream APK links follow below. [Integration notes in Chinese](README.zh-CN.md#多-agent-整合分支)
 

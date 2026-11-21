@@ -87,7 +87,10 @@ final class NativeHandoffPanel {
     }
 
     void route(String from, String to, boolean busy) {
-        source = from;
+        if (!source.equals(from)) {
+            source = from;
+            modelField.setHelperText("agy".equals(from) ? "所选接口将接收本对话的可见记录。" : null);
+        }
         boolean switching = !source.isEmpty() && !source.equals(to) && !busy;
         card.setVisibility(switching ? View.VISIBLE : View.GONE);
         if (!switching) return;
@@ -95,27 +98,21 @@ final class NativeHandoffPanel {
         updateMode();
     }
 
-    String mode(String outgoingAgent) { return "agy".equals(outgoingAgent) ? "manual" : preferredMode; }
+    String mode() { return preferredMode; }
 
     private void updateMode() {
-        String mode = mode(source);
+        String mode = preferredMode;
         String label = MODE_NAMES.get(MODE_IDS.indexOf(mode));
         modeButton.setText(label);
         modeButton.setContentDescription("交接方式，" + label);
-        boolean configurable = !"agy".equals(source);
-        if (modeButton.isEnabled() != configurable) {
-            modeButton.setEnabled(configurable);
-            modeButton.setIcon(configurable ? PixelUi.drawable(ui, "expand") : null);
-        }
         historyButton.setVisibility("manual".equals(mode) ? View.VISIBLE : View.GONE);
         thirdParty.setVisibility("third-party".equals(mode) ? View.VISIBLE : View.GONE);
         updateHistoryLabel();
     }
 
     private void chooseMode() {
-        if ("agy".equals(source)) return;
         sheet = PixelChoiceSheet.show(ui, "交接方式", MODE_NAMES, MODE_IDS.indexOf(preferredMode), which -> {
-            if (disposed || "agy".equals(source)) return;
+            if (disposed) return;
             preferredMode = MODE_IDS.get(which);
             updateMode();
         }, null);

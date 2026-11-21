@@ -168,11 +168,11 @@
     const c = multiConversation(), source = c?.activeAgent, target = chatChoice().agent, switching = source && source !== target && !multiBusy();
     $("ma-mode-row").classList.toggle("hidden", !switching);
     $("ma-transfer").textContent = switching ? multiName(source)+" → "+multiName(target) : "";
-    for (const o of $("ma-mode").options) o.disabled = switching && source === "agy" && o.value !== "manual";
-    if (switching && source === "agy") $("ma-mode").value = "manual";
     const mode = $("ma-mode").value;
     $("ma-manual").classList.toggle("hidden", !switching || mode !== "manual");
     $("ma-third").classList.toggle("hidden", !switching || mode !== "third-party");
+    if (switching && mode === "third-party") $("ma-third-scope").textContent = source === "agy"
+      ? t("所选接口将接收本对话的可见记录。") : t("所选接口将接收原会话可恢复的历史。");
     const alerts = [];
     for (const a of new Set([source,target].filter(Boolean))) for (const q of multi.data?.quota?.[a] || []) {
       if (!Number.isFinite(q.remaining)) continue;

@@ -111,7 +111,6 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
       picked = c.turns.filter(t => ids.has(t.id));
       if (picked.length !== ids.size) throw problem("所选回合无效");
     }
-    if (switching && from === "agy" && mode !== "manual") throw problem("Antigravity 交接请手动选择需要的记录");
     if (switching && mode === "third-party" && !input.provider) throw problem("请选择交接模型接口");
     const turn = { id: randomUUID(), requestId, agent, model: destinationModel.trim(), destinationProvider, effort, serviceTier, user: text, assistant: "", status: "running", at: Date.now() };
     c.turns.push(turn);
@@ -160,7 +159,11 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
           const previous = c.turns.slice(0, -1).findLast(t => t.agent === from && (t.status === "done" || t.assistant));
           const sourceProvider = from === "claude" && previous?.destinationProvider !== "anthropic" ? previous?.destinationProvider : undefined;
           if (mode === "outgoing" && sourceProvider) turn.handoff.provider = sourceProvider;
-          const result = await adapters[from].handoff({ sessionId: c.sessions[from], cwd: c.cwd, text: instruction,
+          const history = from === "agy" ? {
+            turns: c.turns.slice(0, -1).filter(t => t.agent === from && (t.status === "done" || t.assistant)),
+            effort: previous?.effort
+          } : {};
+          const result = await adapters[from].handoff({ ...history, sessionId: c.sessions[from], cwd: c.cwd, text: instruction,
             provider: mode === "third-party" ? input.provider : sourceProvider, model: mode === "third-party" ? input.model : previous?.model || undefined, signal });
           context = result.text;
           if (!context?.trim()) throw problem("交接未返回内容，请重试或手动选择");

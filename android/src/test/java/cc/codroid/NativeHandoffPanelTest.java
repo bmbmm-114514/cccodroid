@@ -38,7 +38,7 @@ public class NativeHandoffPanelTest {
         @Implementation protected static void call(Activity a, String method, String route, JSONObject body,
                 Consumer<JSONObject> success, Consumer<String> error) {
             if (route.startsWith("/api/multi/state")) {
-                JSONObject turn = NativeHome.json("id", "turn-1", "user", "写一个组件", "agent", "claude");
+                JSONObject turn = NativeHome.json("id", "turn-1", "user", "写一个组件", "agent", source);
                 JSONObject conversation = NativeHome.json("id", "conversation", "activeAgent", source,
                         "turns", new JSONArray().put(turn));
                 success.accept(NativeHome.json("conversation", conversation, "providers", providers));
@@ -92,8 +92,10 @@ public class NativeHandoffPanelTest {
         assertNull(Gateway.sent);
         assertNotNull(find(home.root, "继续开发"));
 
+        Gateway.source = "agy";
         Gateway.providers.put(provider("b"));
         home.chat.refreshSelection();
+        assertNotNull(find(home.root, "所选接口将接收本对话的可见记录。"));
         tap(home.root, "发送");
         assertNotNull(Gateway.sent);
         assertEquals("third-party", Gateway.sent.optString("mode"));
@@ -103,7 +105,9 @@ public class NativeHandoffPanelTest {
         assertEquals("继续开发", Gateway.sent.optString("text"));
     }
 
-    @Test public void manualHistoryCanBeCancelledAndAgyAlwaysUsesConfirmedTurns() {
+    @Test public void manualAgyHandoffCanBeCancelledAndSendsOnlyConfirmedTurns() {
+        Gateway.source = "agy";
+        home.chat.refreshSelection();
         assertNull(findClass(home.root, Spinner.class));
         choose("自动交接", "手动选择");
         tap(home.root, "选择历史回合");
@@ -121,16 +125,28 @@ public class NativeHandoffPanelTest {
         row.performClick();
         tap(history.getWindow().getDecorView(), "确定");
         settle();
-        choose("手动选择", "第三方接口");
-        Gateway.source = "agy";
         home.chat.refreshSelection();
-        assertFalse(find(home.root, "手动选择").isEnabled());
+        assertTrue(find(home.root, "手动选择").isEnabled());
         assertNotNull(find(home.root, "已选 1 个历史回合"));
         home.share("交接");
         tap(home.root, "发送");
         assertNotNull(Gateway.sent);
         assertEquals("manual", Gateway.sent.optString("mode"));
         assertEquals("turn-1", Gateway.sent.optJSONArray("selected").optString(0));
+    }
+
+    @Test public void shortAgyChatDefaultsToOutgoingWithoutSelectingHistory() {
+        Gateway.source = "agy";
+        home.chat.refreshSelection();
+        assertTrue(find(home.root, "自动交接").isEnabled());
+        assertNull(find(home.root, "选择历史回合"));
+        home.share("继续这个组件");
+        tap(home.root, "发送");
+        assertNotNull(Gateway.sent);
+        assertEquals("outgoing", Gateway.sent.optString("mode"));
+        assertEquals("codex", Gateway.sent.optString("agent"));
+        assertEquals(0, Gateway.sent.optJSONArray("selected").length());
+        assertFalse(Gateway.sent.has("provider"));
     }
 
     @Test public void outgoingUsesTheExistingProtocolAndEmptyProvidersHaveNoPicker() {

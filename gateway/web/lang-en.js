@@ -3311,6 +3311,7 @@ window.I18N_DICT.en = {
   "原 Agent 整理": "Outgoing agent selects",
   "第三方模型整理": "Third-party model selects",
   "手动选择": "Select manually",
+  "所选接口将接收本对话的可见记录。": "The selected provider will receive the visible history of this conversation.",
   "所选接口将接收原会话可恢复的历史。": "The selected provider will receive the recoverable history from the original session.",
   "选择要附带的回合": "Choose turns to include",
   "打开授权页": "Open authorization page",
