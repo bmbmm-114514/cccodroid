@@ -17,6 +17,7 @@ import android.view.View;
 public class BrowserActivity extends Activity implements BrowserPane.Host {
     static final String EXTRA_URL = "url";
     private BrowserPane pane;
+    private Runnable detachBack;
 
     /** 从对话界面打开：url 为空就回到上次看的那页 */
     static void open(Context c, String url) {
@@ -58,6 +59,15 @@ public class BrowserActivity extends Activity implements BrowserPane.Host {
         if (req == 8) pane.onResult(res, data);
     }
 
+    @Override public void onBrowserHistoryChanged(boolean available) {
+        if (available && detachBack == null && !isDestroyed()) {
+            detachBack = PixelBack.attach(this, this::onBackPressed);
+        } else if (!available && detachBack != null) {
+            detachBack.run();
+            detachBack = null;
+        }
+    }
+
     @Override public void onBackPressed() {
         if (!pane.back()) finish();
     }
@@ -67,6 +77,7 @@ public class BrowserActivity extends Activity implements BrowserPane.Host {
     @Override protected void onPause() { visible = false; Battery.foreground(false); super.onPause(); pane.pause(); }
     @Override protected void onResume() { super.onResume(); visible = true; Battery.foreground(true); FrameRate.apply(this); pane.resume(); }
     @Override protected void onDestroy() {
+        onBrowserHistoryChanged(false);
         if (pane != null) pane.destroy();
         super.onDestroy();
     }

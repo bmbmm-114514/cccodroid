@@ -1,25 +1,30 @@
 package cc.codroid;
 
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
-import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
 import org.json.JSONObject;
 
 public class NativePairingPanel {
-    public static void add(NativeHome h, LinearLayout root) {
-        new NativePairingPanel(h, root);
+    static NativePairingPanel add(NativeHome h, LinearLayout root) {
+        return new NativePairingPanel(h, root);
     }
 
     private final NativeHome h;
     private final LinearLayout root;
     private final int gen;
-    private final TextView statusText;
+    private int requestId;
+    private boolean submitting;
+    private final TextView statusMetricValue;
+    private final TextView statusDetail;
     private final LinearLayout actionsRow, pairBox;
-    private final Button installBtn, activateBtn, repairBtn;
-    private final EditText codeEdit, portEdit;
+    private final MaterialButton installBtn, activateBtn, repairBtn, pairSubmitBtn;
+    private final TextInputEditText codeEdit, portEdit;
 
     private NativePairingPanel(NativeHome h, LinearLayout root) {
         this.h = h;
@@ -31,88 +36,140 @@ public class NativePairingPanel {
         panel.setPadding(0, h.dp(8), 0, h.dp(8));
         root.addView(panel);
 
-        statusText = new TextView(h.a);
-        statusText.setVisibility(View.GONE);
-        statusText.setPadding(0, 0, 0, h.dp(8));
-        panel.addView(statusText);
+        statusMetricValue = NativeStatusViews.metric(panel, "连接状态", "未知");
+
+        statusDetail = NativeStatusViews.detail(panel, "");
+        statusDetail.setVisibility(View.GONE);
 
         actionsRow = new LinearLayout(h.a);
         actionsRow.setOrientation(LinearLayout.VERTICAL);
         panel.addView(actionsRow);
 
-        installBtn = new Button(h.a);
-        installBtn.setText("安装 Shizuku");
+        installBtn = createButton("安装 Shizuku", () -> submit("/api/app/shz_install", NativeHome.json()));
         installBtn.setVisibility(View.GONE);
-        installBtn.setOnClickListener(v -> h.post("/api/app/shz_install", NativeHome.json(), this::update));
         actionsRow.addView(installBtn);
 
-        activateBtn = new Button(h.a);
+        activateBtn = createButton("一键安装并激活", () -> submit("/api/app/shz_activate", NativeHome.json()));
         activateBtn.setVisibility(View.GONE);
-        activateBtn.setOnClickListener(v -> h.post("/api/app/shz_activate", NativeHome.json(), this::update));
         actionsRow.addView(activateBtn);
 
-        repairBtn = new Button(h.a);
+        repairBtn = createButton("无线调试配对", () -> submit("/api/app/shz_repair", NativeHome.json()));
         repairBtn.setVisibility(View.GONE);
-        repairBtn.setOnClickListener(v -> h.post("/api/app/shz_repair", NativeHome.json(), this::update));
         actionsRow.addView(repairBtn);
 
         pairBox = new LinearLayout(h.a);
         pairBox.setOrientation(LinearLayout.VERTICAL);
         pairBox.setVisibility(View.GONE);
 
-        TextView pairHint = new TextView(h.a);
-        pairHint.setText("输入无线调试配对码与端口：");
-        pairBox.addView(pairHint);
-
-        codeEdit = new EditText(h.a);
-        codeEdit.setHint("6 位配对码");
-        codeEdit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        codeEdit.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
-        codeEdit.setSaveEnabled(false);
-        pairBox.addView(codeEdit);
-
-        portEdit = new EditText(h.a);
-        portEdit.setHint("配对端口（无线调试配对框中显示）");
-        portEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
-        portEdit.setSaveEnabled(false);
-        pairBox.addView(portEdit);
-
-        Button pairSubmitBtn = new Button(h.a);
-        pairSubmitBtn.setText("完成配对");
-        pairSubmitBtn.setOnClickListener(v -> submitPair());
+        pairBox.setPaddingRelative(h.dp(16), h.dp(4), h.dp(16), h.dp(8));
+        codeEdit = addInput("6 位配对码", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        portEdit = addInput("配对端口", InputType.TYPE_CLASS_NUMBER);
+        pairSubmitBtn = createButton("完成配对", this::submitPair);
         pairBox.addView(pairSubmitBtn);
+        actionsRow.setPaddingRelative(h.dp(16), 0, h.dp(16), h.dp(8));
 
         panel.addView(pairBox);
         poll();
     }
 
+    private TextInputEditText addInput(String hint, int type) {
+        TextInputLayout field = new TextInputLayout(h.a);
+        field.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
+        field.setHint(hint);
+        field.setSaveEnabled(false);
+        TextInputEditText input = new TextInputEditText(field.getContext());
+        input.setInputType(type);
+        input.setSingleLine(true);
+        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        input.setSaveEnabled(false);
+        field.addView(input);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = h.dp(8);
+        pairBox.addView(field, lp);
+        return input;
+    }
+
+    private MaterialButton createButton(String label, Runnable action) {
+        MaterialButton btn = PixelUi.button(h.a, label, action);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.gravity = Gravity.START;
+        lp.topMargin = h.dp(4);
+        btn.setLayoutParams(lp);
+        btn.setMinHeight(h.dp(48));
+        return btn;
+    }
+
     private void submitPair() {
-        String code = codeEdit.getText().toString().replaceAll("\\D", "");
-        if (code.length() != 6) { h.notice("配对码是 6 位数字"); return; }
-        String port = portEdit.getText().toString().replaceAll("\\D", "");
-        if (port.length() < 4 || port.length() > 5 || Integer.parseInt(port) > 65535 || Integer.parseInt(port) < 1) { h.notice("把配对框里的端口也填上（冒号后面那串数字）"); return; }
+        String code = codeEdit.getText().toString();
+        String port = portEdit.getText().toString();
+        if (!code.matches("[0-9]{6}")) {
+            codeEdit.setError("请输入 6 位配对码");
+            return;
+        }
+        if (!port.matches("[0-9]{4,5}") || Integer.parseInt(port) < 1 || Integer.parseInt(port) > 65535) {
+            portEdit.setError("请输入无线调试配对框中的端口");
+            return;
+        }
         codeEdit.setText("");
         portEdit.setText("");
-        h.post("/api/app/shz_pair", NativeHome.json("code", code + " " + port), this::update);
+        submit("/api/app/shz_pair", NativeHome.json("code", code + " " + port));
+    }
+
+    private void submit(String path, JSONObject body) {
+        if (submitting) return;
+        submitting = true;
+        ++requestId;
+        root.removeCallbacks(delayedPoll);
+        h.req("POST", path, body, result -> {
+            submitting = false;
+            update(result);
+        }, error -> {
+            submitting = false;
+            h.notice(error);
+            poll();
+        });
     }
 
     private final Runnable delayedPoll = this::poll;
 
-    private void poll() {
-        if (h.generation != gen) return;
-        h.get("/api/priv/status", this::update);
+    void poll() {
+        if (h.generation != gen || submitting) return;
+        final int id = ++requestId;
+        h.get("/api/priv/status", status -> {
+            if (id == requestId) update(status);
+        });
     }
 
     private void update(JSONObject st) {
         if (h.generation != gen || st == null) return;
         root.removeCallbacks(delayedPoll);
-        if (st.has("ok") && !st.optBoolean("ok") && st.optString("state").isEmpty()) { h.notice(st.optString("message", "操作失败")); return; }
+        if (st.has("ok") && !st.optBoolean("ok")) {
+            h.notice(st.optString("message", "操作失败"));
+            if (st.optString("state").isEmpty()) return;
+        }
+
         String state = st.optString("state");
-        boolean wl = st.optBoolean("wireless", true), paired = st.optBoolean("paired");
+        boolean wl = st.optBoolean("wireless", true);
+        boolean paired = st.optBoolean("paired");
         JSONObject su = st.optJSONObject("setup");
         String phase = su != null ? su.optString("phase", "idle") : "idle";
         boolean busy = !"idle".equals(phase) && !"done".equals(phase) && !"error".equals(phase);
         boolean isPairing = "pairing".equals(phase);
+
+        String status;
+        switch (state) {
+            case "ok":
+                status = "已就绪";
+                int uid = st.optInt("uid", -1);
+                if (uid >= 0) status += uid == 0 ? " · root" : " · uid " + uid;
+                if (!st.isNull("version")) status += " · v" + st.optString("version");
+                break;
+            case "not_installed": status = "未安装"; break;
+            case "not_running": status = "未运行"; break;
+            case "no_permission": status = "尚未授权"; break;
+            default: status = st.optString("message", "未知"); break;
+        }
+        statusMetricValue.setText(status);
 
         String msg = "";
         if (su != null && su.has("message") && su.optString("message").length() > 0 && !("ok".equals(state) && "done".equals(phase))) {
@@ -122,11 +179,12 @@ public class NativePairingPanel {
             }
         } else if ("ok".equals(state) && wl && !paired && !busy) {
             msg = st.optInt("pairOk") == 0
-                ? "无线调试里 cccodroid 的配对已被取消：现在还能用，但重启手机后没法自动激活。"
-                : "Shizuku 不是由 cccodroid 激活的：重启手机后 cccodroid 没法自动激活它。配对一次即可。";
+                ? "无线调试配对已取消。重新配对后，手机重启时可自动激活。"
+                : "与此手机配对后，cccodroid 可在重启后自动激活 Shizuku。";
         }
-        statusText.setText(msg);
-        statusText.setVisibility(msg.length() > 0 ? View.VISIBLE : View.GONE);
+        statusDetail.setText(msg);
+        statusDetail.setVisibility(msg.length() > 0 ? View.VISIBLE : View.GONE);
+
         pairBox.setVisibility(isPairing ? View.VISIBLE : View.GONE);
         actionsRow.setVisibility(isPairing ? View.GONE : View.VISIBLE);
         installBtn.setVisibility("not_installed".equals(state) && !busy ? View.VISIBLE : View.GONE);

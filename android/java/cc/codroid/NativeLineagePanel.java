@@ -1,6 +1,8 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import androidx.appcompat.app.AlertDialog;
 import android.net.Uri;
 import android.text.TextUtils;
 import android.widget.*;
@@ -57,7 +59,7 @@ public class NativeLineagePanel {
         String name = "cccodroid-lineage-" + System.currentTimeMillis() + ".html";
         h.post("/api/lineage/export", NativeHome.json("name", name, "data", sb.toString()), r -> {
             String file = r.optString("file");
-            new AlertDialog.Builder(h.a).setTitle("导出成功").setMessage("文件已保存至：\n" + file)
+            new MaterialAlertDialogBuilder(h.a).setTitle("导出成功").setMessage("文件已保存至：\n" + file)
                 .setPositiveButton("分享", (d, w) -> h.post("/api/app/share_file", NativeHome.json("path", file, "mime", "text/html"), s -> h.notice(s.optBoolean("ok", false) ? "已调起分享" : s.optString("message", "分享失败"))))
                 .setNegativeButton("关闭", null).show();
         });
@@ -88,7 +90,7 @@ public class NativeLineagePanel {
         }
         ScrollView sv = new ScrollView(h.a);
         sv.addView(layout);
-        new AlertDialog.Builder(h.a).setTitle("选择汇合会话 (2-8个)").setView(sv)
+        new MaterialAlertDialogBuilder(h.a).setTitle("选择汇合会话 (2-8个)").setView(sv)
             .setPositiveButton("提取材料", (d, w) -> {
                 List<JSONObject> picked = new ArrayList<>();
                 List<String> hows = new ArrayList<>();
@@ -131,7 +133,7 @@ public class NativeLineagePanel {
         et.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(12));
         ScrollView sv = new ScrollView(h.a);
         sv.addView(et);
-        new AlertDialog.Builder(h.a).setTitle("预览并编辑汇合草稿").setView(sv)
+        new MaterialAlertDialogBuilder(h.a).setTitle("预览并编辑汇合草稿").setView(sv)
             .setPositiveButton("创建新对话草稿", (d, w) -> {
                 String text = et.getText().toString().trim();
                 if (text.isEmpty()) { h.notice("草稿内容不能为空"); return; }
@@ -148,7 +150,7 @@ public class NativeLineagePanel {
         if (cands.isEmpty()) { h.notice("暂无可用会话"); return; }
         String[] titles = new String[cands.size()];
         for (int i = 0; i < cands.size(); i++) titles[i] = titleOf(cands.get(i));
-        new AlertDialog.Builder(h.a).setTitle("选择目标会话 (子级)")
+        new MaterialAlertDialogBuilder(h.a).setTitle("选择目标会话 (子级)")
             .setItems(titles, (d, which) -> showExtraConfig(h, cands.get(which), cands, edges))
             .setNegativeButton("取消", null).show();
     }
@@ -173,7 +175,7 @@ public class NativeLineagePanel {
             for (String pid : existingParents) {
                 Button btn = new Button(h.a);
                 btn.setText("解除来源: " + pid);
-                btn.setOnClickListener(v -> new AlertDialog.Builder(h.a).setTitle("确认解除")
+                btn.setOnClickListener(v -> new MaterialAlertDialogBuilder(h.a).setTitle("确认解除")
                     .setMessage("确认解除与来源 " + pid + " 的关联？")
                     .setPositiveButton("解除", (d, w) -> h.post("/api/lineage/extra",
                         NativeHome.json("child", childId, "drop", pid), r -> { h.notice("已解除关联"); if (picker[0] != null) picker[0].dismiss(); h.nav("lineage"); }))
@@ -197,7 +199,7 @@ public class NativeLineagePanel {
         }
         ScrollView sv = new ScrollView(h.a);
         sv.addView(layout);
-        picker[0] = new AlertDialog.Builder(h.a).setTitle("补记来源：" + titleOf(child)).setView(sv)
+        picker[0] = new MaterialAlertDialogBuilder(h.a).setTitle("补记来源：" + titleOf(child)).setView(sv)
             .setPositiveButton("保存补记", (d, w) -> {
                 JSONArray addArr = new JSONArray();
                 for (int i = 0; i < cbs.size(); i++) {

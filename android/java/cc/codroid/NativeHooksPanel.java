@@ -1,6 +1,7 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.graphics.Typeface;
 import android.text.InputType;
 import android.view.Gravity;
@@ -83,7 +84,7 @@ public class NativeHooksPanel {
             public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                 if (pos == scopeIndex) return;
                 if (isDirty()) {
-                    new AlertDialog.Builder(h.a).setTitle("放弃修改？").setMessage("当前配置有未保存修改，切换将丢失。")
+                    new MaterialAlertDialogBuilder(h.a).setTitle("放弃修改？").setMessage("当前配置有未保存修改，切换将丢失。")
                         .setPositiveButton("放弃并切换", (d, w) -> { scopeIndex = pos; curScope = SCOPES[pos]; renderScope(); })
                         .setNegativeButton("保留", (d, w) -> scopeSpinner.setSelection(scopeIndex)).setCancelable(false).show();
                 } else { scopeIndex = pos; curScope = SCOPES[pos]; renderScope(); }
@@ -96,7 +97,7 @@ public class NativeHooksPanel {
         testBtn.setOnClickListener(v -> showTestDialog());
         h.button(root, "重新载入", () -> {
             if (!isDirty()) load();
-            else new AlertDialog.Builder(h.a).setMessage("放弃未保存的修改并重新载入？")
+            else new MaterialAlertDialogBuilder(h.a).setMessage("放弃未保存的修改并重新载入？")
                     .setPositiveButton("重新载入", (d,w) -> load()).setNegativeButton("取消", null).show();
         });
         load();
@@ -225,7 +226,7 @@ public class NativeHooksPanel {
         if (sc == null) return;
         boolean targetDisabled = !sc.optBoolean("disableAll", false);
         String action = targetDisabled ? "暂停所有钩子" : "恢复生效钩子";
-        new AlertDialog.Builder(h.a).setTitle("确认" + action).setMessage("确定要" + action + "吗？")
+        new MaterialAlertDialogBuilder(h.a).setTitle("确认" + action).setMessage("确定要" + action + "吗？")
             .setPositiveButton("确定", (dia, w) -> {
                 JSONObject body = NativeHome.json("scope", curScope, "dir", data.optString("dir"), "disableAll", targetDisabled, "expectedHooks", origHooks, "expectedDisabled", !targetDisabled);
                 h.post("/api/ext/hooks/save", body, res -> {
@@ -254,7 +255,7 @@ public class NativeHooksPanel {
         EditText toEd = new EditText(h.a); toEd.setHint("超时秒数 (1-600)"); toEd.setText("60");
         toEd.setInputType(InputType.TYPE_CLASS_NUMBER); layout.addView(toEd);
         ScrollView sv = new ScrollView(h.a); sv.addView(layout);
-        new AlertDialog.Builder(h.a).setTitle("测试钩子命令").setView(sv)
+        new MaterialAlertDialogBuilder(h.a).setTitle("测试钩子命令").setView(sv)
             .setPositiveButton("测试", (dia, w) -> {
                 String cmd = cmdEd.getText().toString().trim();
                 if (cmd.isEmpty()) { h.notice("命令不能为空"); return; }
@@ -262,7 +263,7 @@ public class NativeHooksPanel {
                 int to = 60;
                 try { to = Math.max(1, Math.min(600, Integer.parseInt(toEd.getText().toString().trim()))); } catch (Exception ignored) {}
                 final int fTo = to;
-                new AlertDialog.Builder(h.a).setTitle("确认执行命令")
+                new MaterialAlertDialogBuilder(h.a).setTitle("确认执行命令")
                     .setMessage("即将执行以下命令：\n\n" + cmd + "\n\n事件：" + ev + "\n超时：" + fTo + "秒\n\n警告：将在本机执行，确定继续？")
                     .setPositiveButton("立即执行", (d2, w2) -> {
                         JSONObject req = NativeHome.json("command", cmd, "event", ev, "matcher", mat, "dir", data.optString("dir"), "input", inp, "timeout", fTo);
@@ -285,7 +286,7 @@ public class NativeHooksPanel {
         TextView tv = new TextView(h.a); tv.setText(rep); tv.setTypeface(Typeface.MONOSPACE);
         int pad = h.dp(16); tv.setPadding(pad, pad, pad, pad);
         ScrollView sv = new ScrollView(h.a); sv.addView(tv);
-        new AlertDialog.Builder(h.a).setTitle("测试结果").setView(sv).setPositiveButton("关闭", null).show();
+        new MaterialAlertDialogBuilder(h.a).setTitle("测试结果").setView(sv).setPositiveButton("关闭", null).show();
     }
 
     private static boolean astEquals(Object a, Object b) {

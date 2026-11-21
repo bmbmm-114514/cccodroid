@@ -1,6 +1,8 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import androidx.appcompat.app.AlertDialog;
 import android.content.Context;
 import android.net.Uri;
 import android.text.InputType;
@@ -117,7 +119,7 @@ public class NativeMcpEditorPanel {
         });
         updateCredHint.run();
 
-        AlertDialog dialog = new AlertDialog.Builder(ctx)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(ctx)
             .setTitle(isEdit ? "编辑 MCP 服务器" : "添加 MCP 服务器")
             .setView(sv)
             .setPositiveButton(isEdit ? "保存" : "添加", null)
@@ -147,7 +149,7 @@ public class NativeMcpEditorPanel {
                 }
             }
             if (dirty) {
-                new AlertDialog.Builder(ctx).setMessage("放弃未保存的修改？")
+                new MaterialAlertDialogBuilder(ctx).setMessage("放弃未保存的修改？")
                     .setPositiveButton("放弃", (d, w) -> { clearSecrets.run(); dialog.dismiss(); })
                     .setNegativeButton("继续编辑", null).show();
             } else {
@@ -266,7 +268,7 @@ public class NativeMcpEditorPanel {
 
             boolean transDiscard = isEdit && (!"stdio".equals(origTrans) != !isStdio);
             if (transDiscard) {
-                new AlertDialog.Builder(ctx).setTitle("确认切换协议")
+                new MaterialAlertDialogBuilder(ctx).setTitle("确认切换协议")
                     .setMessage("切换传输协议将丢弃后端存储的不兼容密钥凭据，是否继续？")
                     .setPositiveButton("继续", (d, w) -> submit.run())
                     .setNegativeButton("取消", null).show();

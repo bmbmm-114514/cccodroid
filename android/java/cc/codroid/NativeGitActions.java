@@ -1,6 +1,7 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.widget.*;
 import org.json.*;
 import java.io.*;
@@ -20,13 +21,13 @@ public class NativeGitActions {
     public static void add(NativeHome h, LinearLayout parent, String dir, Runnable refresh) {
         parent.addView(PixelUi.icon(h.a, "more", "更多 Git 操作", () -> {
             String[] items = {"提交日志", "拉取 (Pull)", "推送 (Push)", "抓取 (Fetch)", "设置身份"};
-            new AlertDialog.Builder(h.a).setTitle("Git 操作")
+            new MaterialAlertDialogBuilder(h.a).setTitle("Git 操作")
                 .setItems(items, (di, which) -> {
                     if (which == 0) showLog(h, dir);
                     else if (which >= 1 && which <= 3) {
                         String op = which == 1 ? "pull" : (which == 2 ? "push" : "fetch");
                         String title = items[which];
-                        new AlertDialog.Builder(h.a).setTitle("确认" + title)
+                        new MaterialAlertDialogBuilder(h.a).setTitle("确认" + title)
                             .setMessage("确定要执行 " + title + " 吗？")
                             .setPositiveButton("确定", (d, w) -> write(h, op, NativeHome.json("dir", dir), res -> {
                                 h.notice(title + " 成功");
@@ -48,7 +49,7 @@ public class NativeGitActions {
                 JSONObject c = commits.optJSONObject(i);
                 list[i] = c.optString("short") + " " + c.optString("subject") + " (" + c.optString("author") + ")";
             }
-            new AlertDialog.Builder(h.a).setTitle("提交日志")
+            new MaterialAlertDialogBuilder(h.a).setTitle("提交日志")
                 .setItems(list, (d, w) -> showCommit(h, dir, commits.optJSONObject(w).optString("hash")))
                 .setNegativeButton("取消", null).show();
         }));
@@ -62,7 +63,7 @@ public class NativeGitActions {
             int len = files != null ? files.length() : 0;
             String[] list = new String[len];
             for (int i = 0; i < len; i++) list[i] = files.optJSONObject(i).optString("path");
-            new AlertDialog.Builder(h.a)
+            new MaterialAlertDialogBuilder(h.a)
                 .setTitle(msg.trim().isEmpty() ? hash : msg.trim())
                 .setItems(list, (d, w) -> showDiff(h, dir, hash, list[w]))
                 .setNegativeButton("返回", null).show();
@@ -80,7 +81,7 @@ public class NativeGitActions {
             tv.setText(diff);
             tv.setPadding(h.dp(12), h.dp(8), h.dp(12), h.dp(8));
             sv.addView(tv);
-            new AlertDialog.Builder(h.a).setTitle("文件对比: " + file)
+            new MaterialAlertDialogBuilder(h.a).setTitle("文件对比: " + file)
                 .setView(sv)
                 .setNegativeButton("关闭", null).show();
         }));
@@ -93,7 +94,7 @@ public class NativeGitActions {
         EditText etName = new EditText(h.a); etName.setHint("用户名 (Name)");
         EditText etEmail = new EditText(h.a); etEmail.setHint("邮箱 (Email)");
         ll.addView(etName); ll.addView(etEmail);
-        new AlertDialog.Builder(h.a).setTitle("设置 Git 身份")
+        new MaterialAlertDialogBuilder(h.a).setTitle("设置 Git 身份")
             .setView(ll)
             .setPositiveButton("保存", (d, w) -> {
                 String name = etName.getText().toString().trim();
@@ -129,7 +130,7 @@ public class NativeGitActions {
                         JSONArray risks=r.optJSONArray("risks");
                         StringBuilder text=new StringBuilder(r.optString("message"));
                         for(int i=0; risks!=null && i<risks.length();i++)text.append("\n").append(risks.optString(i));
-                        new AlertDialog.Builder(h.a).setTitle("信任此仓库的配置？").setMessage(text)
+                        new MaterialAlertDialogBuilder(h.a).setTitle("信任此仓库的配置？").setMessage(text)
                                 .setNegativeButton("取消",null).setPositiveButton("信任并继续",(d,w) -> {
                                     try { body.put("trust",r.optString("fp"));write(h,op,body,ok); }
                                     catch(org.json.JSONException e){h.notice(e.getMessage());}

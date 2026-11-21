@@ -1,5 +1,7 @@
 package cc.codroid;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -97,7 +99,7 @@ public class NativeFrequencyPanel {
                         if (next.length() > 0) next.append("\n");
                         next.append(java.text.DateFormat.getDateTimeInstance().format(new java.util.Date(times.optLong(i))));
                     }
-                    new android.app.AlertDialog.Builder(h.a).setTitle("下次执行").setMessage(next).setPositiveButton("关闭", null).show();
+                    new MaterialAlertDialogBuilder(h.a).setTitle("下次执行").setMessage(next).setPositiveButton("关闭", null).show();
                 });
             } catch (IllegalArgumentException e) {
                 h.notice(e.getMessage());

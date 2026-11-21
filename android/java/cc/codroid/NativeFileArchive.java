@@ -1,6 +1,8 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import androidx.appcompat.app.AlertDialog;
 import android.os.Handler;
 import android.widget.EditText;
 import org.json.JSONArray;
@@ -19,7 +21,7 @@ public class NativeFileArchive {
             if (res.optBoolean("needPassword")) {
                 EditText et = new EditText(h.a);
                 et.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-                new AlertDialog.Builder(h.a).setTitle("输入解压密码").setView(et)
+                new MaterialAlertDialogBuilder(h.a).setTitle("输入解压密码").setView(et)
                         .setPositiveButton("确定", (d, w) -> browse(h, path, inner, et.getText().toString(), destDir, ref))
                         .setNegativeButton("取消", null).show();
                 return;
@@ -32,7 +34,7 @@ public class NativeFileArchive {
                 JSONObject o = arr.optJSONObject(i);
                 names.add(o.optString("name") + (o.optBoolean("dir") ? "/" : ""));
             }
-            new AlertDialog.Builder(h.a).setTitle(inner.isEmpty() ? "浏览压缩包" : inner)
+            new MaterialAlertDialogBuilder(h.a).setTitle(inner.isEmpty() ? "浏览压缩包" : inner)
                     .setItems(names.toArray(new String[0]), (d, w) -> {
                         int idx = w;
                         if (!inner.isEmpty()) {
@@ -48,7 +50,7 @@ public class NativeFileArchive {
                         if (item.optBoolean("dir")) {
                             browse(h, path, inner + name + "/", pwd, destDir, ref);
                         } else {
-                            new AlertDialog.Builder(h.a).setTitle(name)
+                            new MaterialAlertDialogBuilder(h.a).setTitle(name)
                                     .setItems(new String[]{"解压此项", "全部解压"}, (di, act) ->
                                             promptExtract(h, path, destDir, act == 0 ? Collections.singletonList(inner + name) : null, pwd, ref))
                                     .show();
@@ -62,7 +64,7 @@ public class NativeFileArchive {
     private static void promptExtract(NativeHome h, String path, String dest, List<String> entries, String pwd, Runnable ref) {
         EditText et = new EditText(h.a);
         et.setText(new java.io.File(dest, new java.io.File(path).getName() + ".files").getPath());
-        new AlertDialog.Builder(h.a).setTitle("解压目标路径").setView(et)
+        new MaterialAlertDialogBuilder(h.a).setTitle("解压目标路径").setView(et)
                 .setPositiveButton("解压", (d, w) -> {
                     try {
                         JSONObject req = NativeHome.json("path", path, "dest", et.getText().toString());
@@ -76,7 +78,7 @@ public class NativeFileArchive {
     public static void create(NativeHome h, List<String> absoluteSelectedPaths, String dir, Runnable refresh) {
         EditText et = new EditText(h.a);
         et.setHint("输入文件名(无需后缀)");
-        new AlertDialog.Builder(h.a).setTitle("压缩为 ZIP").setView(et)
+        new MaterialAlertDialogBuilder(h.a).setTitle("压缩为 ZIP").setView(et)
                 .setPositiveButton("确定", (d, w) -> {
                     String name = et.getText().toString().trim();
                     if (name.isEmpty() || name.equals(".") || name.equals("..") || name.contains("/")) { h.notice("请输入单个压缩包名称"); return; }
@@ -92,7 +94,7 @@ public class NativeFileArchive {
         int gen = h.generation;
         Handler handler = new Handler(h.a.getMainLooper());
         AlertDialog[] dlg = new AlertDialog[1];
-        dlg[0] = new AlertDialog.Builder(h.a).setTitle("处理中").setMessage("进度: 0%")
+        dlg[0] = new MaterialAlertDialogBuilder(h.a).setTitle("处理中").setMessage("进度: 0%")
                 .setCancelable(false)
                 .setNegativeButton("取消", (d, w) -> h.post("/api/arc/cancel", NativeHome.json("id", id), r -> {}))
                 .show();

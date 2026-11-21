@@ -53,7 +53,11 @@ public class BrowserPane extends LinearLayout {
 
     /** 宿主：关闭（✕ / 渲染进程崩了）怎么处理由它定 */
     /** onPicked：开发者工具里选中了一块，json 是 JSON.stringify 的结果再经 evaluateJavascript 编成的 JS 字符串字面量 */
-    public interface Host { void onPaneClose(); void onPicked(String json); }
+    public interface Host {
+        void onPaneClose();
+        void onPicked(String json);
+        default void onBrowserHistoryChanged(boolean canGoBack) {}
+    }
 
     private final Activity act;
     private final Host host;
@@ -355,7 +359,9 @@ public class BrowserPane extends LinearLayout {
 
     private void shown(String url) {
         if (!bar.hasFocus()) bar.setText(url == null ? "" : url);
-        back.setAlpha(web.canGoBack() ? 1f : 0.35f);
+        boolean canGoBack = web.canGoBack();
+        back.setAlpha(canGoBack ? 1f : 0.35f);
+        host.onBrowserHistoryChanged(canGoBack);
         fwd.setAlpha(web.canGoForward() ? 1f : 0.35f);
     }
 

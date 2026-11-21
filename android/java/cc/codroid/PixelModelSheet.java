@@ -1,29 +1,21 @@
 package cc.codroid;
 
 import android.app.Activity;
-import android.app.Dialog;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
-import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.MotionEvent;
-import android.view.ViewConfiguration;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
-import android.view.WindowManager;
-import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import java.util.List;
 
@@ -33,7 +25,7 @@ final class PixelModelSheet {
     private boolean saving;
     private int dp(float amount) { return Math.round(host.getResources().getDisplayMetrics().density * amount); }
 
-    private final Dialog dialog;
+    private final BottomSheetDialog dialog;
 
     private final LinearLayout sheetView;
     private final LinearLayout accountsContainer;
@@ -53,93 +45,9 @@ final class PixelModelSheet {
         this.host = host;
         this.ui = ui;
 
-        this.dialog = new Dialog(ui, android.R.style.Theme_Translucent_NoTitleBar);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setGravity(Gravity.BOTTOM);
-            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            window.setDimAmount(0.38f);
-            int surface = PixelUi.color(ui, "surfaceContainer");
-            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setNavigationBarColor(surface);
-            if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(true);
-            if (Build.VERSION.SDK_INT >= 26 && Color.luminance(surface) > .5f)
-                window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                window.setNavigationBarContrastEnforced(false);
-            }
-        }
-
-        FrameLayout rootContainer = new FrameLayout(ui);
-        rootContainer.setFocusable(true);
-        rootContainer.setFocusableInTouchMode(true);
-        rootContainer.setOnClickListener(v -> { if (!saving) dismiss(); });
-
-        sheetView = new LinearLayout(ui) {
-            @Override
-            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                int availableH = MeasureSpec.getSize(heightMeasureSpec);
-                int height = Math.min(dp(560), (int) (availableH * (availableH < dp(450) ? .91f : .70f)));
-                heightMeasureSpec = MeasureSpec.makeMeasureSpec(height, MeasureSpec.AT_MOST);
-                int width = Math.min(MeasureSpec.getSize(widthMeasureSpec), dp(560));
-                widthMeasureSpec = MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY);
-                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-            }
-        };
-        sheetView.setOrientation(LinearLayout.VERTICAL);
-        sheetView.setClickable(true);
-        sheetView.setFocusable(true);
-
-        float r = dp(28);
-        GradientDrawable sheetBg = new GradientDrawable();
-        sheetBg.setColor(PixelUi.color(ui, "surfaceContainer"));
-        sheetBg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
-        sheetView.setBackground(sheetBg);
-        sheetView.setElevation(dp(8));
-
-        FrameLayout.LayoutParams sheetLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL
-        );
-        rootContainer.addView(sheetView, sheetLp);
-
-        FrameLayout grip = new FrameLayout(ui);
-        grip.setContentDescription("收起模型选择");
-        grip.setFocusable(true);
-        grip.setOnClickListener(v -> { if (!saving) dismiss(); });
-        View handle = new View(ui);
-        handle.setBackground(PixelUi.shape(ui, "outlineVariant", 2));
-        grip.addView(handle, new FrameLayout.LayoutParams(dp(32), dp(4), Gravity.CENTER));
-        sheetView.addView(grip, new LinearLayout.LayoutParams(-1, dp(28)));
-        grip.setOnTouchListener(new View.OnTouchListener() {
-            private float startY;
-            private final int slop = ViewConfiguration.get(ui).getScaledTouchSlop();
-            @Override public boolean onTouch(View v, MotionEvent event) {
-                if (saving) return true;
-                float delta = event.getRawY() - startY;
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        sheetView.animate().cancel();
-                        startY = event.getRawY();
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        sheetView.setTranslationY(Math.max(0, delta));
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                        if (Math.abs(delta) < slop) { v.performClick(); return true; }
-                        if (delta > dp(48)) { dismiss(); return true; }
-                        // A short or cancelled drag settles in place.
-                    case MotionEvent.ACTION_CANCEL:
-                        sheetView.animate().translationY(0).setDuration(160).start();
-                        return true;
-                    default:
-                        return false;
-                }
-            }
-        });
+        dialog = new BottomSheetDialog(ui);
+        dialog.setDismissWithAnimation(true);
+        sheetView = PixelChoiceSheet.content(ui);
 
         LinearLayout headerBar = new LinearLayout(ui);
         headerBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -198,24 +106,24 @@ final class PixelModelSheet {
         divider.setBackgroundColor(PixelUi.color(ui, "outlineVariant"));
         sheetView.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
 
-        ScrollView vScroll = new ScrollView(ui);
+        androidx.core.widget.NestedScrollView vScroll = new androidx.core.widget.NestedScrollView(ui);
         vScroll.setVerticalScrollBarEnabled(false);
         modelsContainer = new LinearLayout(ui);
         modelsContainer.setOrientation(LinearLayout.VERTICAL);
         modelsContainer.setPadding(0, dp(4), 0, dp(12));
         vScroll.addView(modelsContainer, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        scrollLp.weight = 1f;
         sheetView.addView(vScroll, scrollLp);
 
-        dialog.setContentView(rootContainer);
+        dialog.setContentView(sheetView);
+        PixelChoiceSheet.configure(dialog, ui, 560);
         ProviderSettingsDialog.watchWindow(dialog, close);
     }
 
     public void present() {
         if (!host.isFinishing() && !host.isDestroyed()) {
             dialog.show();
-            Window window = dialog.getWindow();
-            if (window != null) window.setLayout(-1, -1);
             sheetView.announceForAccessibility("切换模型面板已展开");
         }
     }
@@ -248,11 +156,13 @@ final class PixelModelSheet {
         progressBar.setVisibility(loading ? View.VISIBLE : View.GONE);
         saving = loading;
         dialog.setCancelable(!loading);
+        dialog.getBehavior().setDraggable(!loading);
     }
 
     public void dismiss() {
         if (dialog.isShowing()) {
-            dialog.dismiss();
+            dialog.setCancelable(true);
+            dialog.cancel();
         }
     }
 

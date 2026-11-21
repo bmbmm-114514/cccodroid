@@ -1,6 +1,8 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import androidx.appcompat.app.AlertDialog;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -189,7 +191,7 @@ public class NativeSchedulePanel {
             "删除任务"
         };
 
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
             .setTitle(name)
             .setItems(items, (d, which) -> {
                 if (which == 0) {
@@ -212,7 +214,7 @@ public class NativeSchedulePanel {
                 } else if (which == 4) {
                     showEditDialog(h, t, reload);
                 } else if (which == 5) {
-                    new AlertDialog.Builder(h.a)
+                    new MaterialAlertDialogBuilder(h.a)
                         .setTitle("确认删除")
                         .setMessage("确定要删除定时任务「" + name + "」吗？")
                         .setPositiveButton("删除", (cd, cw) -> h.req("DELETE", "/api/sched/" + id, new JSONObject(), res -> reload.run()))
@@ -271,7 +273,7 @@ public class NativeSchedulePanel {
                 layout.addView(none);
             }
 
-            new AlertDialog.Builder(h.a)
+            new MaterialAlertDialogBuilder(h.a)
                 .setTitle(task != null ? task.optString("name", "任务详情") : "详情")
                 .setView(sv)
                 .setPositiveButton("关闭", null)
@@ -309,7 +311,7 @@ public class NativeSchedulePanel {
             // A legacy task may have a frequency that needs to be corrected in the form.
         }
         final String displayedFrequency = initialFrequency;
-        AlertDialog editor = new AlertDialog.Builder(h.a)
+        AlertDialog editor = new MaterialAlertDialogBuilder(h.a)
             .setTitle(existing == null ? "新建定时任务" : "编辑任务")
             .setView(sv)
             .setPositiveButton("保存", null)
@@ -356,7 +358,7 @@ public class NativeSchedulePanel {
         input.setHint("每日预算金额 (USD)");
         input.setText(String.format(Locale.US, "%.2f", currentBudget));
 
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
             .setTitle("设置每日预算 (USD)")
             .setView(input)
             .setPositiveButton("保存", (d, w) -> {
@@ -376,10 +378,10 @@ public class NativeSchedulePanel {
             JSONObject m = missed.optJSONObject(i);
             items[i] = m == null ? "—" : m.optString("name", m.optString("taskId")) + " · " + fmtTime(m.optLong("at"));
         }
-        new AlertDialog.Builder(h.a).setTitle("错过的任务").setItems(items, (d, index) -> {
+        new MaterialAlertDialogBuilder(h.a).setTitle("错过的任务").setItems(items, (d, index) -> {
             JSONObject m = missed.optJSONObject(index);
             if (m == null) return;
-            new AlertDialog.Builder(h.a).setTitle(items[index])
+            new MaterialAlertDialogBuilder(h.a).setTitle(items[index])
                 .setPositiveButton("补跑", (dialog, which) -> h.post("/api/sched/missed",
                     NativeHome.json("taskId", m.optString("taskId"), "act", "run", "at", m.optLong("at")), r -> reload.run()))
                 .setNeutralButton("跳过", (dialog, which) -> h.post("/api/sched/missed",

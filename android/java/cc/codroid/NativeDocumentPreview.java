@@ -1,6 +1,8 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import androidx.appcompat.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.graphics.Typeface;
@@ -118,7 +120,7 @@ public final class NativeDocumentPreview {
         String safeHtml = csp + (source != null ? source : "");
         wv.loadDataWithBaseURL(null, safeHtml, "text/html", "UTF-8", null);
 
-        AlertDialog dialog = new AlertDialog.Builder(ctx)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(ctx)
                 .setTitle("文档预览 (HTML)")
                 .setView(wv)
                 .setPositiveButton("关闭", null)
@@ -160,7 +162,7 @@ public final class NativeDocumentPreview {
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
-        new AlertDialog.Builder(ctx)
+        new MaterialAlertDialogBuilder(ctx)
                 .setTitle("文档预览 (Markdown)")
                 .setView(sv)
                 .setPositiveButton("关闭", null)

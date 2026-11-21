@@ -1,12 +1,15 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.materialswitch.MaterialSwitch;
+import java.util.function.Consumer;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -14,18 +17,22 @@ import java.util.Locale;
 
 public class NativeSettingsPanel {
     public static void show(NativeHome h, String id) {
-        LinearLayout v = PixelUi.group(h.scrolling());
+        LinearLayout page = h.scrolling();
+        if ("set-device".equals(id)) {
+            showDevice(h, page);
+            return;
+        }
+        LinearLayout v = PixelUi.group(page);
         v.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(20));
         if ("set-claude".equals(id)) showClaude(h, v);
         else if ("set-run".equals(id)) showRun(h, v);
         else if ("set-storage".equals(id)) showStorage(h, v);
-        else if ("set-device".equals(id)) showDevice(h, v);
         else if ("set-update".equals(id)) showUpdate(h, v);
         else if ("set-trouble".equals(id)) showTrouble(h, v);
     }
 
     private static void confirm(NativeHome h, String title, String msg, Runnable onOk) {
-        new AlertDialog.Builder(h.a).setTitle(title).setMessage(msg)
+        new MaterialAlertDialogBuilder(h.a).setTitle(title).setMessage(msg)
             .setPositiveButton("确定", (d, w) -> onOk.run()).setNegativeButton("取消", null).show();
     }
 
@@ -213,42 +220,111 @@ public class NativeSettingsPanel {
         pollStorage(h, tvInfo, swAuto, spEvery);
     }
 
-    private static void showDevice(NativeHome h, LinearLayout v) {
-        h.text(v, "设备与通知权限");
-        TextView tvNtf = h.text(v, "通知状态: 读取中…");
-        Switch swDone = addSwitch(v, "任务完成通知", false);
-        Switch swAsk = addSwitch(v, "等待确认通知", false);
-        swDone.setOnClickListener(v1 -> h.post("/api/app/notify_set", NativeHome.json("done", swDone.isChecked()), r -> { h.notice(r.optBoolean("ok") ? "已保存" : r.optString("message", "保存失败")); h.nav("set-device"); }));
-        swAsk.setOnClickListener(v1 -> h.post("/api/app/notify_set", NativeHome.json("ask", swAsk.isChecked()), r -> { h.notice(r.optBoolean("ok") ? "已保存" : r.optString("message", "保存失败")); h.nav("set-device"); }));
-        h.get("/api/app/notify_status", r -> {
-            if (r == null) return;
-            swDone.setChecked(r.optBoolean("done", false));
-            swAsk.setChecked(r.optBoolean("ask", false));
-            tvNtf.setText(r.optBoolean("system", true) ? "系统通知正常" : "提示: 系统设置中本应用通知已被关闭");
+    private static void showDevice(NativeHome h, LinearLayout page) {
+        LinearLayout notifyCard = NativeStatusViews.section(page, "通知");
+        TextView system = NativeStatusViews.metric(notifyCard, "系统通知", "读取中…");
+        MaterialSwitch done = NativeStatusViews.toggle(notifyCard, "任务完成通知");
+        MaterialSwitch ask = NativeStatusViews.toggle(notifyCard, "等待确认通知");
+        done.setEnabled(false);
+        ask.setEnabled(false);
+        Consumer<JSONObject> bind = state -> {
+            if (state == null || !state.optBoolean("ok") || state.isNull("done") || state.isNull("ask")) {
+                system.setText("未知");
+                return;
+            }
+            system.setText(state.isNull("system") ? "未知" : state.optBoolean("system") ? "已允许" : "已关闭");
+            done.setChecked(state.optBoolean("done"));
+            ask.setChecked(state.optBoolean("ask"));
+            done.setEnabled(true);
+            ask.setEnabled(true);
+        };
+        boolean[] saving = {false};
+        int[] refreshId = {0};
+        Runnable refresh = () -> {
+            if (saving[0]) return;
+            int id = ++refreshId[0];
+            done.setEnabled(false);
+            ask.setEnabled(false);
+            h.req("GET", "/api/app/notify_status", null, state -> {
+                if (id == refreshId[0]) bind.accept(state);
+            }, error -> {
+                if (id != refreshId[0]) return;
+                system.setText("无法读取");
+                h.notice(error);
+            });
+        };
+        setNotifyAction(h, done, ask, "done", bind, saving);
+        setNotifyAction(h, ask, done, "ask", bind, saving);
+        refresh.run();
+        PixelUi.row(notifyCard, "settings", "系统通知设置", "", () -> {
+            try {
+                h.a.startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, h.a.getPackageName()));
+            } catch (Exception e) {
+                h.a.startActivity(new Intent(Settings.ACTION_SETTINGS));
+            }
         });
-        h.button(v, "打开系统通知设置", () -> {
-            try { h.a.startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, h.a.getPackageName())); }
-            catch (Exception e) { h.a.startActivity(new Intent(Settings.ACTION_SETTINGS)); }
-        });
-        h.text(v, "Shizuku 提权状态");
-        NativePairingPanel.add(h, v);
-        TextView tvPriv = h.text(v, "读取提权状态…");
-        h.get("/api/priv/status", r -> {
-            if (r == null) return;
-            String st = r.optString("state", "unknown");
-            if ("ok".equals(st)) tvPriv.setText("✓ 已就绪 (" + (r.optInt("uid") == 0 ? "root" : "uid " + r.optInt("uid")) + (r.has("version") ? " v" + r.optString("version") : "") + ")");
-            else if ("not_installed".equals(st)) tvPriv.setText("✗ 未安装 Shizuku");
-            else if ("not_running".equals(st)) tvPriv.setText("✗ Shizuku 未运行");
-            else if ("no_permission".equals(st)) tvPriv.setText("✗ 未取得 Shizuku 授权");
-            else tvPriv.setText(r.optString("message", "状态: " + st));
-        });
-        h.button(v, "打开 / 下载 Shizuku", () -> {
+
+        LinearLayout shizukuCard = NativeStatusViews.section(page, "Shizuku");
+        NativePairingPanel pairing = NativePairingPanel.add(h, shizukuCard);
+
+        PixelUi.row(shizukuCard, "device", "打开或下载 Shizuku", "", () -> {
             Intent it = h.a.getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
-            if (it != null) h.a.startActivity(it);
-            else h.a.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")));
+            if (it != null) {
+                h.a.startActivity(it);
+            } else {
+                h.a.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")));
+            }
         });
-        h.button(v, "请求 Shizuku 授权", () -> h.post("/api/priv/request", new JSONObject(), r -> h.notice(r != null ? r.optString("message", "已发送请求") : "已发送请求")));
-        h.button(v, "打开应用系统权限设置", () -> h.a.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + h.a.getPackageName()))));
+
+        PixelUi.row(shizukuCard, "key", "请求 Shizuku 授权", "", () ->
+                h.post("/api/priv/request", new JSONObject(), r ->
+                        h.notice(r != null ? r.optString("message", "已发送请求") : "已发送请求")));
+
+        LinearLayout permCard = NativeStatusViews.section(page, "系统权限");
+        PixelUi.row(permCard, "lock", "应用系统权限", "", () ->
+                h.a.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + h.a.getPackageName()))));
+        Runnable refreshDevice = () -> {
+            refresh.run();
+            pairing.poll();
+        };
+        h.headerAction("refresh", "刷新设备状态", refreshDevice);
+        // Re-read permissions on return from Android settings or the Shizuku approval window.
+        ViewTreeObserver.OnWindowFocusChangeListener focus = focused -> {
+            if (focused) refreshDevice.run();
+        };
+        if (page.isAttachedToWindow()) page.getViewTreeObserver().addOnWindowFocusChangeListener(focus);
+        page.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {
+                v.getViewTreeObserver().addOnWindowFocusChangeListener(focus);
+            }
+            @Override public void onViewDetachedFromWindow(View v) {
+                v.getViewTreeObserver().removeOnWindowFocusChangeListener(focus);
+            }
+        });
+    }
+
+    private static void setNotifyAction(NativeHome h, MaterialSwitch toggle, MaterialSwitch sibling,
+                                        String key, Consumer<JSONObject> bind, boolean[] saving) {
+        toggle.setOnClickListener(v -> {
+            saving[0] = true;
+            boolean requested = toggle.isChecked();
+            toggle.setEnabled(false);
+            sibling.setEnabled(false);
+            Consumer<String> failed = error -> {
+                saving[0] = false;
+                toggle.setChecked(!requested);
+                toggle.setEnabled(true);
+                sibling.setEnabled(true);
+                h.notice(error);
+            };
+            h.req("POST", "/api/app/notify_set", NativeHome.json(key, requested), state -> {
+                saving[0] = false;
+                if (state.optBoolean("ok") && state.has("done") && state.has("ask")) bind.accept(state);
+                else failed.accept(state.optString("message", "保存失败"));
+            }, failed);
+        });
     }
 
     private static void showUpdate(NativeHome h, LinearLayout v) {

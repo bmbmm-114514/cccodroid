@@ -1,7 +1,8 @@
 package cc.codroid;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -24,7 +25,6 @@ import android.widget.ScrollView;
 import android.app.Dialog;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.view.Window;
@@ -126,7 +126,8 @@ public final class ProviderSettingsDialog {
         return isDismissed || host.isFinishing() || host.isDestroyed() || gen != generation;
     }
 
-    private Dialog dialog;
+    private PixelProviderPage dialog;
+    private Dialog child;
     private LinearLayout officialGroup;
     private SelectRow modelRow, effortRow, tierRow;
     private Button btnPicker;
@@ -281,7 +282,7 @@ public final class ProviderSettingsDialog {
     }
 
     private void present() {
-        dialog = new Dialog(ui, android.R.style.Theme_DeviceDefault_NoActionBar);
+        dialog = new PixelProviderPage(ui, NativeAppearance.theme(host));
         Window window = dialog.getWindow();
         if (window != null) {
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
@@ -290,7 +291,6 @@ public final class ProviderSettingsDialog {
 
             int surfaceColor = PixelUi.color(ui, "surface");
             if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(true);
-            window.setBackgroundDrawable(new ColorDrawable(surfaceColor));
             window.setStatusBarColor(surfaceColor);
             window.setNavigationBarColor(surfaceColor);
 
@@ -309,7 +309,7 @@ public final class ProviderSettingsDialog {
         appbar.setPadding(dp(4), dp(8), dp(16), dp(8));
         appbar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
 
-        View btnBack = PixelUi.icon(ui, "back", "返回", () -> dialog.dismiss());
+        View btnBack = PixelUi.icon(ui, "back", "返回", dialog::closePage);
         appbar.addView(btnBack);
 
         TextView tvHeading = new TextView(ui);
@@ -464,6 +464,7 @@ public final class ProviderSettingsDialog {
         watchWindow(dialog, this::closed);
         dialog.show();
         if (window != null) window.setLayout(-1, -1);
+        dialog.enter();
         reloadAll();
     }
 
@@ -483,6 +484,8 @@ public final class ProviderSettingsDialog {
         isDismissed = true;
         generation++;
         stopPolling();
+        if (child != null && child.isShowing()) child.dismiss();
+        child = null;
         if (hasChanges && onChanged != null) {
             executor.execute(() -> mainHandler.post(() -> {
                 if (!host.isFinishing() && !host.isDestroyed()) onChanged.run();
@@ -752,32 +755,23 @@ public final class ProviderSettingsDialog {
                 }
             }
 
-            new AlertDialog.Builder(ui)
-                    .setTitle(title)
-                    .setSingleChoiceItems(labels, selectedIndex, (dialog, which) -> {
-                        dialog.dismiss();
-                        if (stale(genAtShow) || currentItem != itemAtShow) return;
-                        if (which < 0 || which >= snapshot.size()) return;
-
-                        Choice chosen = snapshot.get(which);
-                        if (chosen.id.equals(selectedId)) return;
-
-                        selectedId = chosen.id;
-                        subtitleView.setText(chosen.label);
-                        view.setContentDescription(title + "，" + chosen.label);
-
-                        if ("model".equals(key)) {
-                            curModel = chosen.id;
-                        } else if ("effort".equals(key)) {
-                            curEffort = chosen.id;
-                        } else if ("serviceTier".equals(key)) {
-                            curServiceTier = chosen.id;
-                        }
-
-                        updatePreferenceField(key, chosen.id);
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
+            child = PixelChoiceSheet.show(ui, title, java.util.Arrays.asList(labels), selectedIndex, which -> {
+                if (stale(genAtShow) || currentItem != itemAtShow) return;
+                if (which < 0 || which >= snapshot.size()) return;
+                Choice chosen = snapshot.get(which);
+                if (chosen.id.equals(selectedId)) return;
+                selectedId = chosen.id;
+                subtitleView.setText(chosen.label);
+                view.setContentDescription(title + "，" + chosen.label);
+                if ("model".equals(key)) {
+                    curModel = chosen.id;
+                } else if ("effort".equals(key)) {
+                    curEffort = chosen.id;
+                } else if ("serviceTier".equals(key)) {
+                    curServiceTier = chosen.id;
+                }
+                updatePreferenceField(key, chosen.id);
+            }, null);
         }
     }
 
@@ -817,26 +811,14 @@ public final class ProviderSettingsDialog {
                 checkedIndex = i;
             }
         }
-        names.add("＋ 添加自定义接口…");
-
-        String[] itemsArray = names.toArray(new String[0]);
-        AlertDialog.Builder b = new AlertDialog.Builder(ui);
-        b.setTitle("选择 API 接口");
-        b.setSingleChoiceItems(itemsArray, checkedIndex, (dialogInterface, which) -> {
-            dialogInterface.dismiss();
-            if (which == apis.size()) {
-                showAddCustomProviderDialog();
-            } else {
-                ProviderItem selected = apis.get(which);
-                selectProvider(selected);
-            }
-        });
-        b.setNegativeButton("取消", null);
-        b.show();
+        final int gen = generation;
+        child = PixelChoiceSheet.show(ui, "选择 API 接口", names, checkedIndex, index -> {
+            if (!stale(gen)) selectProvider(apis.get(index));
+        }, () -> { if (!stale(gen)) showAddCustomProviderDialog(); });
     }
 
     private void showAddCustomProviderDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(ui);
+        AlertDialog.Builder b = new MaterialAlertDialogBuilder(ui);
         b.setTitle("添加自定义厂商");
 
         LinearLayout layout = new LinearLayout(ui);
@@ -865,11 +847,11 @@ public final class ProviderSettingsDialog {
             saveNewCustomProvider(label, baseUrl, apiKey);
         });
         b.setNegativeButton("取消", null);
-        b.show();
+        child = b.show();
     }
 
     private void showCustomModelDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(ui);
+        AlertDialog.Builder b = new MaterialAlertDialogBuilder(ui);
         b.setTitle("输入自定义模型");
 
         LinearLayout layout = new LinearLayout(ui);
@@ -891,7 +873,7 @@ public final class ProviderSettingsDialog {
             updatePreferenceField("model", curModel);
         });
         b.setNegativeButton("取消", null);
-        b.show();
+        child = b.show();
     }
 
     private void reloadAll() {

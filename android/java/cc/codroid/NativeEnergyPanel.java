@@ -1,115 +1,211 @@
 package cc.codroid;
 
+import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import org.json.JSONArray;
 import org.json.JSONObject;
-import java.util.Locale;
+import java.text.DateFormat;
+import java.text.NumberFormat;
+import java.util.Date;
 
-public class NativeEnergyPanel {
-    public static void add(NativeHome h, LinearLayout root) {
-        TextView qv = h.text(root, "官方配额：未查询");
-        h.button(root, "查询订阅剩余额度", () -> h.get("/api/multi/state", res -> {
-            JSONObject q = res != null ? res.optJSONObject("quota") : null;
-            if (q == null) { qv.setText("配额：未知或无数据"); return; }
-            StringBuilder sb = new StringBuilder("官方配额状态:\n");
-            for (String p : new String[]{"claude", "codex", "agy"}) {
-                JSONArray arr = q.optJSONArray(p);
-                if (arr == null || arr.length() == 0) { sb.append(p).append(": 未知\n"); continue; }
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject it = arr.optJSONObject(i);
-                    if (it == null) continue;
-                    double rem = it.optDouble("remaining", -1);
-                    long exp = it.optLong("resetsAt", -1);
-                    sb.append(p).append(" · ").append(it.optString("name", p)).append(": ");
-                    if (rem < 0) sb.append("未知");
-                    else sb.append(String.format(Locale.ROOT, "%.1f%%", rem));
-                    sb.append(exp > 0 ? " (重置: " + java.text.DateFormat.getDateTimeInstance().format(new java.util.Date(exp)) + ")\n" : " (重置: 未知)\n");
+final class NativeEnergyPanel {
+    private static final String[][] PROVIDERS = {
+        {"claude", "Claude Code"}, {"codex", "Codex"}, {"agy", "Antigravity"}
+    };
+    private static final String[][] PERIODS = {
+        {"hour", "小时", "近 24 小时"}, {"day", "日", "近 14 天"}, {"week", "周", "近 12 周"}
+    };
+
+    static void addQuota(NativeHome h, LinearLayout page) {
+        LinearLayout quota = NativeStatusViews.section(page, "订阅剩余额度");
+        NativeStatusViews.detail(quota, "正在读取额度…");
+        h.req("GET", "/api/multi/state", null, res -> renderQuota(quota, res.optJSONObject("quota")),
+                error -> message(quota, "无法读取额度 · " + error));
+    }
+
+    static void add(NativeHome h, LinearLayout page) { new NativeEnergyPanel(h, page); }
+
+    private final NativeHome h;
+    private final LinearLayout battery, samples, bill;
+    private int energyRequest, billRequest;
+
+    private NativeEnergyPanel(NativeHome h, LinearLayout page) {
+        this.h = h;
+        battery = NativeStatusViews.section(page, "设备电池");
+        LinearLayout history = NativeStatusViews.section(page, "耗电记录");
+        MaterialButtonToggleGroup picker = new MaterialButtonToggleGroup(h.a);
+        picker.setSingleSelection(true);
+        picker.setSelectionRequired(true);
+        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-1, -2);
+        bounds.setMargins(h.dp(12), h.dp(8), h.dp(12), 0);
+        history.addView(picker, bounds);
+        for (String[] period : PERIODS) {
+            MaterialButton button = new MaterialButton(h.a);
+            button.setId(View.generateViewId());
+            button.setText(period[1]);
+            button.setTextColor(new android.content.res.ColorStateList(
+                    new int[][]{{android.R.attr.state_checked}, {}},
+                    new int[]{PixelUi.color(h.a, "onSecondaryContainer"), PixelUi.color(h.a, "onSurfaceVariant")}));
+            button.setBackgroundTintList(new android.content.res.ColorStateList(
+                    new int[][]{{android.R.attr.state_checked}, {}},
+                    new int[]{PixelUi.color(h.a, "secondaryContainer"), PixelUi.color(h.a, "surfaceContainerLow")}));
+            button.setStrokeColor(android.content.res.ColorStateList.valueOf(PixelUi.color(h.a, "outlineVariant")));
+            button.setStrokeWidth(h.dp(1));
+            button.setMinHeight(h.dp(48));
+            button.setMinWidth(0);
+            button.setContentDescription(period[2]);
+            button.setTag(period);
+            picker.addView(button, new LinearLayout.LayoutParams(0,-2,1));
+            if (period[0].equals("day")) picker.check(button.getId());
+        }
+        samples = new LinearLayout(h.a);
+        samples.setOrientation(LinearLayout.VERTICAL);
+        history.addView(samples, -1, -2);
+
+        LinearLayout system = NativeStatusViews.section(page, "系统耗电账单");
+        PixelUi.row(system, "usage", "查询系统耗电账单", "自上次充满电起", this::loadBill);
+        bill = new LinearLayout(h.a);
+        bill.setOrientation(LinearLayout.VERTICAL);
+        system.addView(bill, -1, -2);
+
+        picker.addOnButtonCheckedListener((group, id, checked) -> {
+            if (checked) loadEnergy((String[])group.findViewById(id).getTag());
+        });
+        loadEnergy(PERIODS[1]);
+    }
+
+    private static void message(LinearLayout panel, String text) {
+        panel.removeAllViews();
+        NativeStatusViews.detail(panel, text);
+    }
+
+    private static void renderQuota(LinearLayout card, JSONObject quota) {
+        card.removeAllViews();
+        long now = System.currentTimeMillis();
+        for (String[] provider : PROVIDERS) {
+            JSONArray windows = quota == null ? null : quota.optJSONArray(provider[0]);
+            boolean listed = false;
+            if (windows != null) for (int i=0; i<windows.length(); i++) {
+                JSONObject window = windows.optJSONObject(i);
+                if (window == null) continue;
+                if (!listed) {
+                    TextView title = NativeStatusViews.detail(card, provider[1]);
+                    title.setTextColor(PixelUi.color(card.getContext(), "primary"));
                 }
+                listed = true;
+                long reset = window.optLong("resetsAt", 0);
+                boolean expired = reset > 0 && reset <= now;
+                String name = window.optString("name");
+                NativeStatusViews.quota(card, name.isEmpty() ? "当前周期" : name,
+                        expired ? Double.NaN : window.optDouble("remaining", Double.NaN), expired ? 0 : reset);
             }
-            qv.setText(sb.toString().trim());
-        }));
+            if (!listed) NativeStatusViews.metric(card, provider[1], "未知");
+        }
+    }
 
-        String[] views = {"day", "week", "hour"};
-        String[] vNames = {"按日 (近14天)", "按周 (近12周)", "按小时 (近24h)"};
-        int[] vIdx = {0};
-        TextView ev = h.text(root, "能耗分析：未加载");
-        TextView sv = h.text(root, "周期明细：未选择");
-        LinearLayout bl = new LinearLayout(h.a);
-        bl.setOrientation(LinearLayout.VERTICAL);
-        root.addView(bl);
-
-        h.button(root, "查看下一时间范围", () -> {
-            String v = views[vIdx[0]];
-            String vn = vNames[vIdx[0]];
-            vIdx[0] = (vIdx[0] + 1) % views.length;
-            ev.setTag(v);
-            ev.setText("正在加载 " + vn + " 能耗...");
-            sv.setText("周期明细：未选择");
-            bl.removeAllViews();
-
-            h.get("/api/energy?view=" + v, d -> {
-                if (!v.equals(ev.getTag())) return;
-                if (d == null || !d.optBoolean("ok", true)) { ev.setText("能耗接口获取失败"); return; }
-                StringBuilder b = new StringBuilder();
-                JSONObject bat = d.optJSONObject("battery");
-                if (bat != null) {
-                    b.append("电量 ").append(bat.optInt("level") < 0 ? "未知" : bat.optInt("level") + "%")
-                     .append(bat.optBoolean("charging") ? " · 充电中" : " · 放电中");
-                    if (!bat.isNull("currentUa")) b.append(String.format(Locale.ROOT, " · %.0f mA", bat.optDouble("currentUa") / 1000));
-                    if (!bat.isNull("temp")) b.append(String.format(Locale.ROOT, " · %.1f ℃", bat.optDouble("temp")));
-                    b.append(bat.optBoolean("screen") ? " · 亮屏" : " · 息屏").append("\n");
-                } else {
-                    b.append("【电池硬件】采样失败/无硬件数据 (无静默假数据)\n");
-                }
-                JSONArray bars = d.optJSONArray("bars");
-                int bc = bars != null ? bars.length() : 0;
-                b.append("【历史采样】视图: ").append(vn).append("，共 ").append(bc).append(" 周期");
-                ev.setText(b.toString());
-
-                if (bars != null) {
-                    for (int i = Math.max(0, bc - 6); i < bc; i++) {
-                        JSONObject bar = bars.optJSONObject(i);
-                        if (bar == null) continue;
-                        String t = "hour".equals(v) ? java.text.DateFormat.getDateTimeInstance().format(new java.util.Date(bar.optLong("t"))) : bar.optString("t");
-                        double c = bar.optDouble("c",0), f = bar.optDouble("f",0), s = bar.optDouble("s",0), dc = bar.optDouble("d",0);
-                        h.button(bl, t, () -> {
-                            sv.setText(String.format(Locale.ROOT, "%s\n应用 CPU %.0f 秒 · 前台 %.0f 秒 · 亮屏 %.0f 秒 · 整机掉电 %.1f%%", t, c, f, s, dc));
-                        });
-                    }
-                }
-            });
-
+    private void loadEnergy(String[] period) {
+        final int ticket = ++energyRequest;
+        message(samples, "正在读取" + period[2] + "的记录…");
+        if (battery.getChildCount() == 0) message(battery, "正在读取电池状态…");
+        h.req("GET", "/api/energy?view=" + period[0], null, data -> {
+            if (ticket != energyRequest) return;
+            if (!data.optBoolean("ok")) {
+                message(samples, data.optString("message", "无法读取耗电记录"));
+                message(battery, "电池状态未知");
+                return;
+            }
+            renderBattery(data.optJSONObject("battery"));
+            renderSamples(period, data.optJSONArray("bars"));
+            if (billRequest == 0 && data.optJSONObject("sys") != null) renderBill(data.optJSONObject("sys"));
+        }, error -> {
+            if (ticket != energyRequest) return;
+            message(samples, "无法读取耗电记录 · " + error);
+            message(battery, "电池状态未知");
         });
-        h.button(root, "查询系统耗电账单", () -> {
-            h.post("/api/energy/system", new JSONObject(), r -> {
-                if (r == null || !r.optBoolean("ok")) {
-                    h.notice("系统耗电统计失败: " + (r != null ? r.optString("message", "无响应") : "网络异常"));
-                    return;
-                }
-                JSONObject sys = r.optJSONObject("sys");
-                if (sys == null) return;
-                JSONObject me = sys.optJSONObject("me");
-                StringBuilder s = new StringBuilder("\n【系统耗电账单】");
-                if (me != null) {
-                    s.append(String.format(Locale.ROOT, "\n本应用: %.1fmAh (排名: %d/%d, 屏幕: %.1fmAh)",
-                            me.optDouble("mah", 0), me.optInt("rank", 0), sys.optInt("apps", 0), me.optDouble("screen", 0)));
-                } else {
-                    s.append("\n本应用尚无耗电记录");
-                }
-                s.append(String.format(Locale.ROOT, "\n整机已用: %.1fmAh (统计起始: %d秒前)",
-                        sys.optDouble("used", 0), sys.optLong("sinceMs", 0) / 1000));
-                JSONArray top = sys.optJSONArray("top");
-                if (top != null && top.length() > 0) {
-                    s.append("\n耗电前列: ");
-                    for (int j = 0; j < Math.min(3, top.length()); j++) {
-                        JSONObject o = top.optJSONObject(j);
-                        if (o != null) s.append(o.optString("name", "应用")).append(" ")
-                                       .append(String.format(Locale.ROOT, "%.1fmAh", o.optDouble("mah", 0))).append("; ");
-                    }
-                }
-                ev.append(s.toString());
-            });
+    }
+
+    private static String number(double value, String unit) {
+        if (!Double.isFinite(value)) return "未知";
+        NumberFormat format = NumberFormat.getNumberInstance();
+        format.setMaximumFractionDigits(1);
+        return format.format(value) + unit;
+    }
+
+    private void renderBattery(JSONObject state) {
+        if (state == null) { message(battery, "暂无电池采样"); return; }
+        battery.removeAllViews();
+        int level = state.optInt("level", -1);
+        NativeStatusViews.metric(battery, "电池电量", level < 0 || level > 100 ? "未知" : level + "%");
+        if (!state.isNull("charging")) NativeStatusViews.metric(battery, "充电状态", state.optBoolean("charging") ? "充电中" : "放电中");
+        NativeStatusViews.metric(battery, "实时电流", number(state.optDouble("currentUa", Double.NaN) / 1000.0, " mA"));
+        NativeStatusViews.metric(battery, "电池温度", number(state.optDouble("temp", Double.NaN), " ℃"));
+        if (!state.isNull("screen")) NativeStatusViews.metric(battery, "屏幕状态", state.optBoolean("screen") ? "亮屏" : "息屏");
+    }
+
+    private void renderSamples(String[] period, JSONArray bars) {
+        samples.removeAllViews();
+        NativeStatusViews.detail(samples, period[2]);
+        if (bars == null || bars.length() == 0) { NativeStatusViews.detail(samples, "暂无采样"); return; }
+        for (int i = bars.length() - 1; i >= Math.max(0, bars.length() - 6); i--) {
+            JSONObject bar = bars.optJSONObject(i);
+            if (bar == null) continue;
+            String name = "hour".equals(period[0]) && bar.optLong("t", 0) > 0
+                    ? DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(bar.optLong("t")))
+                    : bar.optString("t", "未知时段");
+            if (bar.isNull("c") && bar.isNull("s") && bar.isNull("f") && bar.isNull("d")) {
+                NativeStatusViews.metric(samples, name, "暂无采样");
+                continue;
+            }
+            PixelUi.row(samples, "schedule", name, "", () -> showSample(name, bar));
+        }
+    }
+
+    private void showSample(String name, JSONObject bar) {
+        LinearLayout content = new LinearLayout(h.a);
+        content.setOrientation(LinearLayout.VERTICAL);
+        NativeStatusViews.metric(content, "应用 CPU", number(bar.optDouble("c", Double.NaN), " 秒"));
+        NativeStatusViews.metric(content, "前台", number(bar.optDouble("f", Double.NaN), " 秒"));
+        NativeStatusViews.metric(content, "亮屏", number(bar.optDouble("s", Double.NaN), " 秒"));
+        NativeStatusViews.metric(content, "整机掉电", number(bar.optDouble("d", Double.NaN), "%"));
+        new MaterialAlertDialogBuilder(h.a).setTitle(name).setView(content).setPositiveButton("关闭", null).show();
+    }
+
+    private void loadBill() {
+        final int ticket = ++billRequest;
+        message(bill, "正在向系统查询…");
+        h.req("POST", "/api/energy/system", NativeHome.json(), result -> {
+            if (ticket != billRequest) return;
+            JSONObject report = result.optJSONObject("sys");
+            if (result.optBoolean("ok") && report != null) renderBill(report);
+            else message(bill, result.optString("message", "无法读取系统耗电统计"));
+        }, error -> {
+            if (ticket == billRequest) message(bill, "查询失败 · " + error);
         });
+    }
+
+    private void renderBill(JSONObject report) {
+        bill.removeAllViews();
+        JSONObject me = report.optJSONObject("me");
+        if (me == null) NativeStatusViews.detail(bill, "本应用尚无耗电记录");
+        else {
+            NativeStatusViews.metric(bill, "本应用耗电", number(me.optDouble("mah", Double.NaN), " mAh"));
+            if (!me.isNull("rank") && !report.isNull("apps"))
+                NativeStatusViews.metric(bill, "应用排名", me.optInt("rank") + " / " + report.optInt("apps"));
+            NativeStatusViews.metric(bill, "其中屏幕耗电", number(me.optDouble("screen", Double.NaN), " mAh"));
+        }
+        NativeStatusViews.metric(bill, "整机耗电", number(report.optDouble("used", Double.NaN), " mAh"));
+        long since = report.optLong("sinceMs", -1);
+        if (since >= 0) NativeStatusViews.metric(bill, "统计时长", android.text.format.DateUtils.formatElapsedTime(since / 1000));
+        JSONArray top = report.optJSONArray("top");
+        if (top == null || top.length() == 0) return;
+        NativeStatusViews.detail(bill, "耗电前列");
+        for (int i=0; i<Math.min(3, top.length()); i++) {
+            JSONObject app = top.optJSONObject(i);
+            if (app != null) NativeStatusViews.metric(bill, app.optString("name","应用"), number(app.optDouble("mah", Double.NaN), " mAh"));
+        }
     }
 }

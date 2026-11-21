@@ -56,8 +56,7 @@ public final class PixelNav {
         return bar;
     }
 
-    public static void sync(NavigationBarView bar, String id) {
-        if (bar == null || id == null) return;
+    static int tabIndex(String id) {
         int target;
         if (id.startsWith("set-") || id.startsWith("ext-")) id = "settings";
         if (id.startsWith("project_detail:")) id = "projects";
@@ -88,7 +87,12 @@ public final class PixelNav {
                 target = ID_CHAT;
                 break;
         }
-        MenuItem item = bar.getMenu().findItem(target);
+        return target;
+    }
+
+    public static void sync(NavigationBarView bar, String id) {
+        if (bar == null || id == null) return;
+        MenuItem item = bar.getMenu().findItem(tabIndex(id));
         if (item != null) {
             item.setChecked(true);
         }

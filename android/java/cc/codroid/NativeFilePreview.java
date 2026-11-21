@@ -1,6 +1,7 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.pdf.PdfRenderer;
@@ -199,7 +200,7 @@ public class NativeFilePreview {
         nextBtn.setOnClickListener(v -> { if (index[0] < totalPages - 1) { index[0]++; render.run(); } });
         render.run();
 
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
             .setTitle(file.getName())
             .setView(root)
             .setPositiveButton("关闭", null)

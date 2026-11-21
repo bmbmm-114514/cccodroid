@@ -1,12 +1,14 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.net.Uri;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ImageButton;
 import android.text.TextUtils;
@@ -49,6 +51,10 @@ public class NativeHome {
     private boolean isNavigatingBack = false;
     private boolean disposed = false;
     private boolean paused;
+    private final PixelPageMotion motion;
+    private Runnable detachBack;
+    private int backStartGeneration = -1;
+    private boolean committingGesture, selectingTab;
 
     public NativeHome(MainActivity a, Runnable chooseTheme) {
         this.a = a;
@@ -64,7 +70,10 @@ public class NativeHome {
         root.addView(shell, new LinearLayout.LayoutParams(-1,0,1));
         main = new LinearLayout(a);
         main.setOrientation(LinearLayout.VERTICAL);
-        shell.addView(main, new LinearLayout.LayoutParams(0,-1,1));
+        FrameLayout viewport = new FrameLayout(a);
+        shell.addView(viewport, new LinearLayout.LayoutParams(0, -1, 1));
+        viewport.addView(main, new FrameLayout.LayoutParams(-1, -1));
+        motion = new PixelPageMotion(viewport, main);
 
         MaterialToolbar top = new MaterialToolbar(a);
         top.setContentInsetsRelative(0,0);
@@ -183,7 +192,12 @@ public class NativeHome {
         if (disposed || id.equals(screen)) return;
         history.clear();
         if (!"chat".equals(id)) history.push("chat");
-        returnTo(id);
+        selectingTab = true;
+        try {
+            returnTo(id);
+        } finally {
+            selectingTab = false;
+        }
     }
 
     private void returnTo(String id) {
@@ -203,6 +217,11 @@ public class NativeHome {
             return;
         }
 
+        String previous = screen;
+        String previousTitle = getScreenTitle(previous);
+        boolean changing = !previous.equals(id);
+        if (changing) motion.capture(previous);
+        if (!committingGesture) motion.reset();
         if (!isNavigatingBack && screen != null && !screen.isEmpty() && !screen.equals(id)) {
             history.push(screen);
         }
@@ -212,6 +231,56 @@ public class NativeHome {
         this.screen = id;
         this.generation++;
         renderScreen(id);
+        if (changing) {
+            int direction = a.getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? -1 : 1;
+            if (selectingTab && PixelNav.tabIndex(id) < PixelNav.tabIndex(previous)) direction = -direction;
+            motion.navigate(previous, previousTitle, isNavigatingBack && !selectingTab, committingGesture, direction);
+        }
+        syncBack();
+    }
+
+    boolean canGoBack() { return !disposed && !history.isEmpty(); }
+
+    private void syncBack() {
+        if (canGoBack() && detachBack == null) {
+            detachBack = PixelBack.attach(a, new PixelBack.Handler() {
+                @Override public void start(boolean right) { startBack(right); }
+                @Override public void progress(float fraction) { progressBack(fraction); }
+                @Override public void cancel() { cancelBack(); }
+                @Override public void commit() { commitBack(); }
+            });
+        } else if (!canGoBack() && detachBack != null) {
+            detachBack.run();
+            detachBack = null;
+        }
+    }
+
+    void startBack(boolean fromRight) {
+        if (!canGoBack()) return;
+        backStartGeneration = generation;
+        String destination = history.peek();
+        motion.start(destination, getScreenTitle(destination), fromRight);
+    }
+
+    void progressBack(float fraction) {
+        if (backStartGeneration == generation) motion.seek(fraction);
+    }
+
+    void cancelBack() {
+        backStartGeneration = -1;
+        motion.cancel();
+    }
+
+    void commitBack() {
+        int started = backStartGeneration;
+        backStartGeneration = -1;
+        if (paused || disposed || (started != -1 && started != generation)) return;
+        committingGesture = started == generation;
+        try {
+            back();
+        } finally {
+            committingGesture = false;
+        }
     }
 
     public void showChat(String sharedId) {
@@ -247,6 +316,7 @@ public class NativeHome {
         remember();
         if (paused) return;
         paused = true;
+        motion.reset();
         if ("chat".equals(screen) || "terminal".equals(screen)) {
             generation++;
             chat.leave();
@@ -279,6 +349,8 @@ public class NativeHome {
         disposed = true;
         generation++;
         history.clear();
+        syncBack();
+        motion.dispose();
         body.removeAllViews();
         root.removeAllViews();
     }
@@ -402,7 +474,7 @@ public class NativeHome {
 
     public void confirm(String message, Runnable action) {
         if (disposed) return;
-        new AlertDialog.Builder(a)
+        new MaterialAlertDialogBuilder(a)
                 .setTitle("操作确认")
                 .setMessage(message)
                 .setPositiveButton("确定", (dialog, which) -> {

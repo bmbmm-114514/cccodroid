@@ -1,6 +1,7 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.text.TextUtils;
@@ -15,10 +16,8 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -309,7 +308,7 @@ final class NativeFiles {
                         return true;
                     case 4:
                         String[] paths = roots.toArray(new String[0]);
-                        new AlertDialog.Builder(h.a).setTitle("选择位置").setItems(paths, (dialog, index) -> {
+                        new MaterialAlertDialogBuilder(h.a).setTitle("选择位置").setItems(paths, (dialog, index) -> {
                             currentDir = paths[index];
                             loadFiles(h);
                         }).setNegativeButton("取消", null).show();
@@ -327,7 +326,7 @@ final class NativeFiles {
                         hidden.setChecked(showHidden);
                         box.addView(filter);
                         box.addView(hidden);
-                        new AlertDialog.Builder(h.a).setTitle("筛选文件").setView(box)
+                        new MaterialAlertDialogBuilder(h.a).setTitle("筛选文件").setView(box)
                                 .setPositiveButton("应用", (d, w) -> {
                                     search = filter.getText().toString();
                                     showHidden = hidden.isChecked();
@@ -531,7 +530,7 @@ final class NativeFiles {
     }
 
     private void promptCreate(NativeHome h, boolean isDir) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(h.a);
+        AlertDialog.Builder builder = new MaterialAlertDialogBuilder(h.a);
         builder.setTitle(isDir ? "新建目录" : "新建文件");
         final EditText input = new EditText(h.a);
         input.setHint(isDir ? "目录名称" : "文件名称");
@@ -555,7 +554,7 @@ final class NativeFiles {
     }
 
     private void promptRename(NativeHome h, FileItem item) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(h.a);
+        AlertDialog.Builder builder = new MaterialAlertDialogBuilder(h.a);
         builder.setTitle("重命名");
         final EditText input = new EditText(h.a);
         input.setText(item.name);
@@ -575,7 +574,7 @@ final class NativeFiles {
     }
 
     private void promptDelete(NativeHome h, FileItem item) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(h.a);
+        AlertDialog.Builder builder = new MaterialAlertDialogBuilder(h.a);
         builder.setTitle("确认删除");
         builder.setMessage("确定永久删除 " + (item.isDir ? "目录" : "文件") + "「" + item.name + "」吗？此操作无法撤销。");
         builder.setPositiveButton("删除", (dialog, which) -> {
@@ -606,7 +605,7 @@ final class NativeFiles {
             h.nav("editor");
         };
         if (!isModified) open.run();
-        else new AlertDialog.Builder(h.a).setTitle("放弃当前文件的修改？")
+        else new MaterialAlertDialogBuilder(h.a).setTitle("放弃当前文件的修改？")
                 .setMessage(editingPath).setNegativeButton("取消", null)
                 .setPositiveButton("放弃并打开", (dialog, index) -> open.run()).show();
     }
@@ -662,7 +661,7 @@ final class NativeFiles {
 
         Button closeBtn = makeSmallBtn(h, "关闭", () -> {
             if (isModified) {
-                new AlertDialog.Builder(h.a)
+                new MaterialAlertDialogBuilder(h.a)
                         .setTitle("放弃修改？")
                         .setMessage("当前文件有未保存的改动，确定直接关闭吗？")
                         .setPositiveButton("放弃并关闭", (d, w) -> {
@@ -816,7 +815,7 @@ final class NativeFiles {
                     editingPath = null;
                     if (generation != lastGeneration || activeMode != MODE_EDITOR) return;
                     render(h);
-                    new AlertDialog.Builder(h.a).setTitle("无法在编辑器中打开").setMessage(e.getMessage())
+                    new MaterialAlertDialogBuilder(h.a).setTitle("无法在编辑器中打开").setMessage(e.getMessage())
                             .setPositiveButton("用其他应用打开", (d,w) -> NativeFilePreview.open(h,path,"other"))
                             .setNegativeButton("取消", null).show();
                 });
@@ -934,7 +933,7 @@ final class NativeFiles {
                     h.notice("请填写提交说明");
                     return;
                 }
-                new AlertDialog.Builder(h.a)
+                new MaterialAlertDialogBuilder(h.a)
                         .setTitle("确认提交")
                         .setMessage("提交选中的 " + gitSelection.size() + " 个文件？\n" + msg)
                         .setPositiveButton("确定提交", (d, w) -> {
@@ -1037,7 +1036,7 @@ final class NativeFiles {
     }
 
     private void promptSwitchBranch(NativeHome h) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(h.a);
+        AlertDialog.Builder builder = new MaterialAlertDialogBuilder(h.a);
         builder.setTitle("切换分支");
         LinearLayout box = new LinearLayout(h.a);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -1070,7 +1069,7 @@ final class NativeFiles {
             String diff = resp != null ? resp.optString("diff", "") : "";
             if (diff.isEmpty()) diff = "（无差异内容）";
 
-            AlertDialog.Builder b = new AlertDialog.Builder(h.a);
+            AlertDialog.Builder b = new MaterialAlertDialogBuilder(h.a);
             b.setTitle("差异: " + basename(path));
             ScrollView sv = new ScrollView(h.a);
             HorizontalScrollView hsv = new HorizontalScrollView(h.a);
@@ -1090,7 +1089,7 @@ final class NativeFiles {
     }
 
     private void promptDiscard(NativeHome h, String path) {
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
                 .setTitle("确认撤销改动")
                 .setMessage("确定撤销对文件「" + basename(path) + "」的所有修改吗？未提交的改动将永久丢失。")
                 .setPositiveButton("撤销改动", (d, w) -> {
@@ -1161,7 +1160,7 @@ final class NativeFiles {
 
         Runnable closeTerm = () -> {
             if (activeTermId == null) return;
-            new AlertDialog.Builder(h.a)
+            new MaterialAlertDialogBuilder(h.a)
                     .setTitle("关闭终端")
                     .setMessage("确定结束当前终端会话进程吗？")
                     .setPositiveButton("关闭", (d, w) -> {
@@ -1233,65 +1232,7 @@ final class NativeFiles {
         termScrollView.addView(termTextView);
         h.body.addView(termScrollView);
 
-        // 控制键栏
-        HorizontalScrollView keyScroll = new HorizontalScrollView(h.a);
-        keyScroll.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        LinearLayout keyRow = new LinearLayout(h.a);
-        keyRow.setOrientation(LinearLayout.HORIZONTAL);
-        keyRow.setPadding(pad, pad, pad, pad);
-
-        keyRow.addView(makeKeyBtn(h, "Ctrl+C", () -> sendTermKey(h, "\u0003")));
-        keyRow.addView(makeKeyBtn(h, "Ctrl+D", () -> sendTermKey(h, "\u0004")));
-        keyRow.addView(makeKeyBtn(h, "Ctrl+Z", () -> sendTermKey(h, "\u001A")));
-        keyRow.addView(makeKeyBtn(h, "Tab", () -> sendTermKey(h, "\t")));
-        keyRow.addView(makeKeyBtn(h, "Esc", () -> sendTermKey(h, "\u001B")));
-        keyRow.addView(makeKeyBtn(h, "↑", () -> sendTermKey(h, "\u001B[A")));
-        keyRow.addView(makeKeyBtn(h, "↓", () -> sendTermKey(h, "\u001B[B")));
-        keyRow.addView(makeKeyBtn(h, "←", () -> sendTermKey(h, "\u001B[D")));
-        keyRow.addView(makeKeyBtn(h, "→", () -> sendTermKey(h, "\u001B[C")));
-
-        keyScroll.addView(keyRow);
-        h.body.addView(keyScroll);
-
-        // 底部命令输入行
-        LinearLayout inputBar = new LinearLayout(h.a);
-        inputBar.setOrientation(LinearLayout.HORIZONTAL);
-        inputBar.setGravity(Gravity.CENTER_VERTICAL);
-        inputBar.setPadding(pad, pad, pad, pad);
-
-        final EditText cmdEdit = new EditText(h.a);
-        cmdEdit.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        cmdEdit.setHint("输入终端命令");
-        cmdEdit.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 24));
-        cmdEdit.setMinHeight(h.dp(48));
-        cmdEdit.setPadding(h.dp(16), 0, h.dp(12), 0);
-        cmdEdit.setSingleLine(true);
-        cmdEdit.setImeOptions(EditorInfo.IME_ACTION_SEND);
-        cmdEdit.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND
-                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_DOWN)) {
-                String cmd = cmdEdit.getText().toString();
-                cmdEdit.setText("");
-                sendTermKey(h, cmd + "\n");
-                return true;
-            }
-            return false;
-        });
-        inputBar.addView(cmdEdit);
-
-        Button sendBtn = makeBtn(h, "发送", () -> {
-            String cmd = cmdEdit.getText().toString();
-            cmdEdit.setText("");
-            sendTermKey(h, cmd + "\n");
-        });
-        inputBar.addView(sendBtn);
-        inputBar.addView(makeSmallBtn(h, "仅输入", () -> {
-            String cmd = cmdEdit.getText().toString();
-            if (!cmd.isEmpty()) { sendTermKey(h, cmd); cmdEdit.setText(""); }
-        }));
-
-        h.body.addView(inputBar);
+        TerminalControls.add(h.body, data -> sendTermKey(h, data));
     }
 
     private void loadTerm(NativeHome h) {
@@ -1403,8 +1344,9 @@ final class NativeFiles {
         activeTermThread.start();
     }
 
-    private void sendTermKey(NativeHome h, String data) {
-        if (activeTermId == null) { h.notice("请先新建或选择终端"); return; }
+    private boolean sendTermKey(NativeHome h, String data) {
+        if (activeTermId == null) { h.notice("请先新建或选择终端"); return false; }
+        if (termExited) { h.notice("终端已退出"); return false; }
         final String tid = activeTermId;
         termWrites.execute(() -> {
             HttpURLConnection connection = null;
@@ -1422,6 +1364,7 @@ final class NativeFiles {
                 h.a.runOnUiThread(() -> { if (lastGeneration == h.generation && tid.equals(activeTermId)) h.notice(e.getMessage()); });
             } finally { if (connection != null) connection.disconnect(); }
         });
+        return true;
     }
 
     private void appendTermOutput(String raw) {
@@ -1529,12 +1472,6 @@ final class NativeFiles {
 
     private static Button makeSmallBtn(NativeHome h, String title, Runnable act) {
         return createPixelBtn(h, title, "surfaceContainerHigh", "onSurfaceVariant", 18, 8, 4, 13, 48, act);
-    }
-
-    private static Button makeKeyBtn(NativeHome h, String title, Runnable act) {
-        Button b = createPixelBtn(h, title, "surfaceContainerHigh", "onSurface", 6, 6, 2, 11, 32, act);
-        b.setTypeface(Typeface.MONOSPACE);
-        return b;
     }
 
     private static void renderLoading(NativeHome h, String tip) {

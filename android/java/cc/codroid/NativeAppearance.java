@@ -1,7 +1,9 @@
 package cc.codroid;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
@@ -77,7 +79,7 @@ public final class NativeAppearance {
             }
         }
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(a);
+        AlertDialog.Builder builder = new MaterialAlertDialogBuilder(new android.view.ContextThemeWrapper(a, theme(a)));
         builder.setTitle("选择外观风格");
         builder.setSingleChoiceItems(items, checkedIndex, (dialog, which) -> {
             dialog.dismiss();
@@ -155,7 +157,7 @@ public final class NativeAppearance {
         if (sid.isEmpty() || sid.startsWith("multi:")) {
             finishNative(a, state, sid.isEmpty() ? "" : sid.substring(6));
         } else {
-            AlertDialog waiting = new AlertDialog.Builder(a).setMessage("正在打开原 Claude 会话…")
+            AlertDialog waiting = new MaterialAlertDialogBuilder(new android.view.ContextThemeWrapper(a, theme(a))).setMessage("正在打开原 Claude 会话…")
                     .setNegativeButton("取消", null).show();
             NativeRequests.call(a, "POST", "/api/multi/create", NativeHome.json("claudeSessionId", sid), result -> {
                 if (!waiting.isShowing()) return;

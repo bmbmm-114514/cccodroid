@@ -1,6 +1,8 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import androidx.appcompat.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -60,7 +62,7 @@ public final class NativePanels {
     private static void showProjects(NativeHome h, LinearLayout c) {
         h.headerAction("refresh", "刷新项目列表", () -> h.nav("projects"));
         PixelUi.row(PixelUi.group(c), "add", "添加项目", "创建文件夹、打开已有目录或克隆 Git 仓库", () ->
-                new AlertDialog.Builder(h.a).setTitle("添加项目")
+                new MaterialAlertDialogBuilder(h.a).setTitle("添加项目")
                         .setItems(new String[]{"新建空目录", "添加已有目录", "克隆 Git 项目"}, (dialog, index) ->
                                 createProjectDialog(h, new String[]{"new", "dir", "git"}[index]))
                         .setNegativeButton("取消", null).show());
@@ -155,7 +157,7 @@ public final class NativePanels {
     }
 
     private static void confirmDeleteProject(NativeHome h, String pid, String name) {
-        AlertDialog.Builder b = new AlertDialog.Builder(h.a);
+        AlertDialog.Builder b = new MaterialAlertDialogBuilder(h.a);
         b.setTitle("删除项目「" + name + "」");
         b.setMessage("请选择删除模式：仅移除项目配置记录，或彻底删除磁盘对应目录及其中所有文件。");
         b.setPositiveButton("彻底删除磁盘目录", (d, w) -> {
@@ -207,7 +209,7 @@ public final class NativePanels {
         }
         l.addView(etExtra);
 
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
                 .setTitle(isGit ? "克隆远程 Git 项目" : existing ? "添加已有目录" : "新建本地项目目录")
                 .setView(l)
                 .setPositiveButton("创建", (dialog, which) -> {
@@ -572,7 +574,7 @@ public final class NativePanels {
             String outputStyle = res.optString("outputStyle", "");
 
             PixelUi.row(gSettings, "projects", "工作空间配置", ws.isEmpty() ? "未配置工作空间" : ws, () -> {
-                new android.app.AlertDialog.Builder(h.a)
+                new MaterialAlertDialogBuilder(h.a)
                         .setTitle("工作空间配置")
                         .setMessage(ws.isEmpty() ? "当前未指定工作空间路径" : ws)
                         .setPositiveButton("确定", null)
@@ -594,7 +596,7 @@ public final class NativePanels {
                 container.setPadding(h.dp(24), h.dp(16), h.dp(24), h.dp(8));
                 container.addView(etP);
 
-                new android.app.AlertDialog.Builder(h.a)
+                new MaterialAlertDialogBuilder(h.a)
                         .setTitle("最大并发任务数 (上限 " + maxPCap + ")")
                         .setView(container)
                         .setPositiveButton("保存并发上限", (dialog, which) -> {
@@ -639,7 +641,7 @@ public final class NativePanels {
                 }
 
                 CharSequence[] items = names.toArray(new CharSequence[0]);
-                new android.app.AlertDialog.Builder(h.a)
+                new MaterialAlertDialogBuilder(h.a)
                         .setTitle("输出格式风格")
                         .setSingleChoiceItems(items, checked, (dialog, which) -> {
                             dialog.dismiss();
@@ -673,12 +675,12 @@ public final class NativePanels {
                 int activeIndex = modes.indexOf(active);
                 CharSequence[] items = modes.toArray(new CharSequence[0]);
 
-                new android.app.AlertDialog.Builder(h.a)
+                new MaterialAlertDialogBuilder(h.a)
                         .setTitle("切换底层运行模式")
                         .setSingleChoiceItems(items, activeIndex, (dialog, which) -> {
                             dialog.dismiss();
                             String selectedMode = modes.get(which);
-                            new android.app.AlertDialog.Builder(h.a)
+                            new MaterialAlertDialogBuilder(h.a)
                                     .setTitle("切换执行模式")
                                     .setMessage("切换底层执行模式并立即重启网关吗？")
                                     .setPositiveButton("确定", (d2, w2) -> {
@@ -778,7 +780,7 @@ public final class NativePanels {
     }
 
     private static void confirmDialog(Context ctx, String title, String msg, Runnable onConfirm) {
-        new AlertDialog.Builder(ctx)
+        new MaterialAlertDialogBuilder(ctx)
                 .setTitle(title)
                 .setMessage(msg)
                 .setPositiveButton("确定", (d, w) -> {

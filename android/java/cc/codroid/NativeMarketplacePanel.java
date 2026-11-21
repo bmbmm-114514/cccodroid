@@ -1,6 +1,7 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -18,7 +19,7 @@ public class NativeMarketplacePanel {
         h.button(marketSec, "＋ 添加市场源", () -> {
             EditText et = new EditText(h.a);
             et.setHint("Git 仓库 URL 或本地路径");
-            new AlertDialog.Builder(h.a)
+            new MaterialAlertDialogBuilder(h.a)
                 .setTitle("添加市场源")
                 .setView(et)
                 .setPositiveButton("添加", (d, w) -> {
@@ -125,7 +126,7 @@ public class NativeMarketplacePanel {
     }
 
     private static void confirm(NativeHome h, String title, String msg, Runnable ok) {
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
             .setTitle(title)
             .setMessage(msg)
             .setPositiveButton("确定", (d, w) -> ok.run())

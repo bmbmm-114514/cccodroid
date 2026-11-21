@@ -1,6 +1,7 @@
 package cc.codroid;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
@@ -65,7 +66,7 @@ public final class NativeExtensionPanel {
     }
 
     private void confirm(NativeHome h, String title, String msg, Runnable ok) {
-        new AlertDialog.Builder(h.a)
+        new MaterialAlertDialogBuilder(h.a)
             .setTitle(title)
             .setMessage(msg)
             .setPositiveButton("确定", (d, w) -> ok.run())

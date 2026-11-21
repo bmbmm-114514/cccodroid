@@ -146,6 +146,7 @@ public class MainActivity extends Activity {
     private volatile Uri picked;
 
     private NativeHome nativeHome;
+    private Runnable detachClassicBack;
     private String paletteAtLaunch = "";
     private android.app.WallpaperManager.OnColorsChangedListener nativeWallpaperListener;
 
@@ -183,6 +184,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         if (nativeHome != null) { nativeHome.dispose(); nativeHome = null; }
+        if (detachClassicBack != null) { detachClassicBack.run(); detachClassicBack = null; }
         if (Build.VERSION.SDK_INT >= 31 && nativeWallpaperListener != null)
             android.app.WallpaperManager.getInstance(this).removeOnColorsChangedListener(nativeWallpaperListener);
         if (fold != null) fold.stop();
@@ -1728,6 +1730,7 @@ public class MainActivity extends Activity {
         if (!NativeAppearance.nativeMode(this)) { showWeb(); return; }
         if (isDestroyed() || isFinishing()) return;
         if (nativeHome != null) nativeHome.dispose();
+        if (detachClassicBack != null) { detachClassicBack.run(); detachClassicBack = null; }
         askPerms();
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(true);
         int surface = NativeAppearance.resolveColor(this, android.R.attr.colorBackground, getWindow().getStatusBarColor());
@@ -1765,6 +1768,7 @@ public class MainActivity extends Activity {
         if (isDestroyed()) return;
         // 下面 removeAllViews 会把窗格摘掉；字段不清的话窗格从此一片空白、关不掉（同上 中-3）
         if (pane != null) closePane(true);
+        if (detachClassicBack == null) detachClassicBack = PixelBack.attach(this, this::onBackPressed);
         askPerms();
         // 网页调试默认关：开着时任何连上 adb 的电脑都能读页面（含网关令牌）。
         // 要调试就在终端里 touch ~/.webdebug，重开应用。这个文件同 uid 的脚本也建得出来，所以光有它不算数：
