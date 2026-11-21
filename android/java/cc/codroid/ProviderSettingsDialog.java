@@ -49,6 +49,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 public final class ProviderSettingsDialog {
 
@@ -102,15 +103,17 @@ public final class ProviderSettingsDialog {
 
     private final Activity host;
     private final Context ui;
-    private final Runnable onChanged;
+    private final Consumer<Boolean> onClosed;
     private final float density;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private boolean isDismissed;
+    private boolean closeNotified;
     private int modelRead;
-    private boolean hasChanges = false;
+    private boolean hasChanges;
+    private int pendingWrites;
     private int generation = 0;
 
     private Runnable pollRunnable = null;
@@ -167,9 +170,13 @@ public final class ProviderSettingsDialog {
     }
 
     private ProviderSettingsDialog(Activity host, Runnable onChanged) {
+        this(host, changed -> { if (changed && onChanged != null) onChanged.run(); });
+    }
+
+    private ProviderSettingsDialog(Activity host, Consumer<Boolean> onClosed) {
         this.host = host;
         this.ui = new android.view.ContextThemeWrapper(host, NativeAppearance.theme(host));
-        this.onChanged = onChanged;
+        this.onClosed = onClosed;
         this.density = host.getResources().getDisplayMetrics().density;
     }
 
@@ -180,6 +187,8 @@ public final class ProviderSettingsDialog {
     /** A provider tap previews its catalog. Only tapping a model changes the conversation defaults. */
     private PixelModelSheet quickSheet;
     private boolean quickSaving;
+    private boolean detailsOpen;
+    private boolean quickRefreshing;
     private int quickRead;
     private ProviderItem quickProvider;
 
@@ -189,14 +198,35 @@ public final class ProviderSettingsDialog {
     }
 
     private void presentQuick() {
-        quickSheet = new PixelModelSheet(host, ui, () -> {
-            if (quickSaving) return;
-            quickSheet.dismiss();
-            show(host, onChanged);
-        }, this::closed);
+        quickSheet = new PixelModelSheet(host, ui, this::openQuickSettings, this::closed);
         quickSheet.present();
-        quickSheet.message("正在读取接口…");
-        final int gen = generation;
+        reloadQuick(null);
+    }
+
+    private void openQuickSettings() {
+        if (detailsOpen || quickSaving || isDismissed) return;
+        detailsOpen = true;
+        ProviderSettingsDialog fullSettings = new ProviderSettingsDialog(host, savedChanges -> {
+            child = null;
+            detailsOpen = false;
+            if (savedChanges) {
+                hasChanges = true;
+                if (!isDismissed) {
+                    String previewKey = quickProvider != null ? quickProvider.entryKey : null;
+                    reloadQuick(previewKey);
+                }
+            }
+            notifyWhenClosed();
+        });
+        // Leave the quick sheet visible beneath the full page during predictive back.
+        fullSettings.present();
+        child = fullSettings.dialog;
+    }
+
+    private void reloadQuick(String previewKey) {
+        quickRefreshing = true;
+        if (previewKey == null) quickSheet.message("正在读取接口…");
+        final int gen = ++generation;
         executor.execute(() -> {
             try {
                 String pref = requestHttp("GET", "/api/multi/preferences", null);
@@ -209,23 +239,33 @@ public final class ProviderSettingsDialog {
                     for (ProviderItem item : providerList) {
                         if (item.isOfficial || item.local || item.hasKey) available.add(item);
                     }
-                    openQuickProvider(available, available.contains(selected) ? selected : available.get(0));
+                    quickRefreshing = false;
+                    ProviderItem preview = findProviderByEntryKey(previewKey);
+                    if (!available.contains(preview)) preview = available.contains(selected) ? selected : available.get(0);
+                    openQuickProvider(available, preview);
                 });
             } catch (Exception e) {
-                mainHandler.post(() -> { if (!stale(gen)) quickSheet.message("无法读取接口：" + e.getMessage()); });
+                mainHandler.post(() -> {
+                    if (stale(gen)) return;
+                    quickRefreshing = false;
+                    quickSheet.message("无法读取接口：" + e.getMessage());
+                });
             }
         });
     }
 
     private void openQuickProvider(List<ProviderItem> available, ProviderItem item) {
-        if (item == null || quickSaving || isDismissed) return;
+        if (item == null || quickSaving || quickRefreshing || isDismissed) return;
+        boolean samePreview = quickProvider != null && quickProvider.entryKey.equals(item.entryKey);
         quickProvider = item;
         final int gen = generation, read = ++quickRead;
         List<String> names = new ArrayList<>();
         for (ProviderItem p : available) names.add(p.isOfficial ? officialName(p) : p.label);
-        quickSheet.accounts(names, available.indexOf(item), i -> openQuickProvider(available, available.get(i)));
-        quickSheet.models(java.util.Collections.emptyList(), -1, i -> {});
-        quickSheet.message("正在读取模型…");
+        quickSheet.accounts(names, available.indexOf(item), samePreview, i -> openQuickProvider(available, available.get(i)));
+        if (!samePreview) {
+            quickSheet.models(java.util.Collections.emptyList(), -1, i -> {});
+            quickSheet.message("正在读取模型…");
+        }
         NativeRequests.call(host, "GET", "/api/multi/preferences?provider=" + Uri.encode(item.providerId), null, saved -> {
             if (stale(gen) || read != quickRead) return;
             final String model = saved.optString("model");
@@ -235,7 +275,11 @@ public final class ProviderSettingsDialog {
             }, error -> {
                 if (!stale(gen) && read == quickRead) quickModels(item, model, new JSONObject(), "模型列表暂不可用");
             });
-        }, error -> { if (!stale(gen) && read == quickRead) quickSheet.message(error); });
+        }, error -> {
+            if (stale(gen) || read != quickRead) return;
+            quickSheet.models(java.util.Collections.emptyList(), -1, i -> {});
+            quickSheet.message(error);
+        });
     }
 
     private void quickModels(ProviderItem item, String model, JSONObject catalog, String message) {
@@ -251,17 +295,17 @@ public final class ProviderSettingsDialog {
     }
 
     private void saveQuick(ProviderItem item, String model) {
-        if (isDismissed || quickSaving || item != quickProvider) return;
+        if (isDismissed || quickSaving || detailsOpen || quickRefreshing || item != quickProvider) return;
         quickSaving = true;
         quickSheet.busy(true);
         final int gen = generation;
-        executor.execute(() -> {
+        executeWrite(() -> {
             try {
                 String body = new JSONObject().put("agent", item.agent).put("provider", item.providerId).put("model", model).toString();
                 requestHttp("POST", "/api/multi/preferences", body);
                 mainHandler.post(() -> {
-                    if (stale(gen)) return;
                     hasChanges = true;
+                    if (stale(gen)) return;
                     quickSaving = false;
                     quickSheet.dismiss();
                 });
@@ -486,12 +530,29 @@ public final class ProviderSettingsDialog {
         stopPolling();
         if (child != null && child.isShowing()) child.dismiss();
         child = null;
-        if (hasChanges && onChanged != null) {
-            executor.execute(() -> mainHandler.post(() -> {
-                if (!host.isFinishing() && !host.isDestroyed()) onChanged.run();
-            }));
-        }
         executor.shutdown();
+        notifyWhenClosed();
+    }
+
+    private void notifyWhenClosed() {
+        if (!isDismissed || closeNotified || detailsOpen || pendingWrites != 0
+                || host.isFinishing() || host.isDestroyed()) return;
+        closeNotified = true;
+        onClosed.accept(hasChanges);
+    }
+
+    private void executeWrite(Runnable write) {
+        pendingWrites++;
+        executor.execute(() -> {
+            try {
+                write.run();
+            } finally {
+                mainHandler.post(() -> {
+                    pendingWrites--;
+                    notifyWhenClosed();
+                });
+            }
+        });
     }
 
     private LinearLayout vertical() {
@@ -1025,9 +1086,8 @@ public final class ProviderSettingsDialog {
         }
 
         if (sendPreference) {
-            hasChanges = true;
             progressBar.setVisibility(View.VISIBLE);
-            executor.execute(() -> {
+            executeWrite(() -> {
                 try {
                     JSONObject body = new JSONObject();
                     body.put("agent", item.agent);
@@ -1039,6 +1099,7 @@ public final class ProviderSettingsDialog {
                     String tier = obj.optString("serviceTier", "");
 
                     mainHandler.post(() -> {
+                        hasChanges = true;
                         if (stale(gen)) return;
                         progressBar.setVisibility(View.GONE);
                         curModel = model;
@@ -1264,21 +1325,16 @@ public final class ProviderSettingsDialog {
                                 return;
                             }
 
+                            JSONObject accountState = stateObj.optJSONObject(currentItem.agent);
+                            JSONObject account = accountState == null ? null : accountState.optJSONObject("account");
+                            boolean loggedIn = accountState != null && (currentItem.officialType == TYPE_CHATGPT
+                                    ? account != null && "chatgpt".equalsIgnoreCase(account.optString("type"))
+                                    : accountState.optBoolean("loggedIn"));
+                            if (loggedIn) hasChanges = true;
                             renderAccountState(stateObj);
 
-                            boolean keepPolling = false;
-                            if (currentItem.officialType == TYPE_CHATGPT) {
-                                JSONObject cx = stateObj.optJSONObject("codex");
-                                if (cx != null && cx.optJSONObject("login") != null) {
-                                    keepPolling = true;
-                                }
-                            } else if (currentItem.officialType == TYPE_GOOGLE) {
-                                JSONObject agy = stateObj.optJSONObject("agy");
-                                if (agy != null && !agy.optBoolean("loggedIn", false) && agy.optJSONObject("login") != null) {
-                                    keepPolling = true;
-                                }
-                            }
-
+                            boolean keepPolling = !loggedIn && accountState != null
+                                    && accountState.optJSONObject("login") != null;
                             if (keepPolling && pollRunnable != null) {
                                 mainHandler.postDelayed(pollRunnable, 1500);
                             }
@@ -1528,7 +1584,6 @@ public final class ProviderSettingsDialog {
 
     private void updatePreferenceField(String key, String value) {
         if (currentItem == null) return;
-        hasChanges = true;
         final int gen = generation;
         final ProviderItem item = currentItem;
 
@@ -1537,12 +1592,14 @@ public final class ProviderSettingsDialog {
             layoutEffort.setVisibility(View.GONE);
             layoutTier.setVisibility(View.GONE);
         }
-        executor.execute(() -> {
+        executeWrite(() -> {
             try {
                 JSONObject body = new JSONObject().put("agent", item.agent).put("provider", item.providerId)
                         .put("model", model).put(key, value);
                 JSONObject saved = new JSONObject(requestHttp("POST", "/api/multi/preferences", body.toString()));
-                if ("model".equals(key)) mainHandler.post(() -> {
+                mainHandler.post(() -> {
+                    hasChanges = true;
+                    if (!"model".equals(key)) return;
                     if (stale(gen) || !model.equals(curModel)) return;
                     curEffort = saved.optString("effort");
                     curServiceTier = saved.optString("serviceTier");
@@ -1575,7 +1632,7 @@ public final class ProviderSettingsDialog {
         progressBar.setVisibility(View.VISIBLE);
         btnSaveKey.setEnabled(false);
 
-        executor.execute(() -> {
+        executeWrite(() -> {
             try {
                 JSONObject b = new JSONObject();
                 b.put("id", target.providerId);
@@ -1583,13 +1640,13 @@ public final class ProviderSettingsDialog {
                 requestHttp("POST", "/api/providers/save", b.toString());
 
                 mainHandler.post(() -> {
+                    hasChanges = true;
                     if (stale(gen)) return;
                     progressBar.setVisibility(View.GONE);
                     btnSaveKey.setEnabled(true);
                     currentItem.hasKey = true;
                     tvKeyStatus.setText("已配置 API 密钥");
                     etApiKey.setText("");
-                    hasChanges = true;
                     Toast.makeText(host, "密钥已保存", Toast.LENGTH_SHORT).show();
                 });
             } catch (Exception e) {
@@ -1607,7 +1664,7 @@ public final class ProviderSettingsDialog {
         final int gen = generation;
         progressBar.setVisibility(View.VISIBLE);
 
-        executor.execute(() -> {
+        executeWrite(() -> {
             try {
                 JSONObject b = new JSONObject();
                 b.put("label", label);
@@ -1632,10 +1689,10 @@ public final class ProviderSettingsDialog {
                 );
 
                 mainHandler.post(() -> {
+                    hasChanges = true;
                     if (stale(gen)) return;
                     progressBar.setVisibility(View.GONE);
                     providerList.add(newItem);
-                    hasChanges = true;
                     selectProvider(newItem);
                     Toast.makeText(host, "已添加并切换至 " + label, Toast.LENGTH_SHORT).show();
                 });

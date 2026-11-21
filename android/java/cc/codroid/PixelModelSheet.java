@@ -17,7 +17,9 @@ import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import androidx.core.widget.NestedScrollView;
 import java.util.List;
+import java.util.Objects;
 
 final class PixelModelSheet {
     private final Activity host;
@@ -30,6 +32,7 @@ final class PixelModelSheet {
     private final LinearLayout sheetView;
     private final LinearLayout accountsContainer;
     private final LinearLayout modelsContainer;
+    private final NestedScrollView modelScroll;
     private final TextView messageView;
     private final ProgressBar progressBar;
 
@@ -46,7 +49,7 @@ final class PixelModelSheet {
         this.ui = ui;
 
         dialog = PixelChoiceSheet.createDialog(ui);
-        sheetView = PixelChoiceSheet.content(ui);
+        sheetView = PixelChoiceSheet.content(ui, true);
 
         LinearLayout headerBar = new LinearLayout(ui);
         headerBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -79,19 +82,6 @@ final class PixelModelSheet {
         headerBar.addView(settingsBtn);
         sheetView.addView(headerBar);
 
-        progressBar = new ProgressBar(ui, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setIndeterminate(true);
-        progressBar.setVisibility(View.GONE);
-        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4));
-        sheetView.addView(progressBar, progressLp);
-
-        messageView = new TextView(ui);
-        messageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        messageView.setTextColor(PixelUi.color(ui, "onSurfaceVariant"));
-        messageView.setPadding(dp(20), dp(4), dp(20), dp(8));
-        messageView.setVisibility(View.GONE);
-        sheetView.addView(messageView);
-
         HorizontalScrollView hScroll = new HorizontalScrollView(ui);
         hScroll.setHorizontalScrollBarEnabled(false);
         hScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
@@ -105,15 +95,30 @@ final class PixelModelSheet {
         divider.setBackgroundColor(PixelUi.color(ui, "outlineVariant"));
         sheetView.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
 
-        androidx.core.widget.NestedScrollView vScroll = new androidx.core.widget.NestedScrollView(ui);
-        vScroll.setVerticalScrollBarEnabled(false);
+        progressBar = new ProgressBar(ui, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setIndeterminate(true);
+        progressBar.setVisibility(View.GONE);
+        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4));
+        sheetView.addView(progressBar, progressLp);
+
+        modelScroll = new NestedScrollView(ui);
+        modelScroll.setVerticalScrollBarEnabled(false);
+        LinearLayout body = new LinearLayout(ui);
+        body.setOrientation(LinearLayout.VERTICAL);
+
+        messageView = new TextView(ui);
+        messageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        messageView.setTextColor(PixelUi.color(ui, "onSurfaceVariant"));
+        messageView.setPadding(dp(20), dp(4), dp(20), dp(8));
+        messageView.setVisibility(View.GONE);
+        body.addView(messageView);
+
         modelsContainer = new LinearLayout(ui);
         modelsContainer.setOrientation(LinearLayout.VERTICAL);
         modelsContainer.setPadding(0, dp(4), 0, dp(12));
-        vScroll.addView(modelsContainer, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        scrollLp.weight = 1f;
-        sheetView.addView(vScroll, scrollLp);
+        body.addView(modelsContainer);
+        modelScroll.addView(body);
+        sheetView.addView(modelScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         dialog.setContentView(sheetView);
         PixelChoiceSheet.configure(dialog, ui, 560);
@@ -127,11 +132,21 @@ final class PixelModelSheet {
         }
     }
 
-    void accounts(List<String> labels, int selected, java.util.function.IntConsumer choose) {
-        this.currentAccounts = labels;
-        this.selectedAccount = selected;
-        this.accountConsumer = choose;
-        rebuildAccounts();
+    void accounts(List<String> labels, int selected, boolean samePreview, java.util.function.IntConsumer choose) {
+        boolean sameLabels = Objects.equals(currentAccounts, labels);
+        int previous = selectedAccount;
+        currentAccounts = labels;
+        selectedAccount = selected;
+        accountConsumer = choose;
+        if (sameLabels) {
+            if (selected != previous) {
+                styleAccount(previous);
+                styleAccount(selected);
+            }
+        } else {
+            rebuildAccounts();
+        }
+        if (!samePreview) modelScroll.scrollTo(0, 0);
     }
 
     void models(List<String> labels, int selected, java.util.function.IntConsumer choose) {
@@ -147,6 +162,7 @@ final class PixelModelSheet {
         } else {
             messageView.setText(text);
             messageView.setVisibility(View.VISIBLE);
+            modelScroll.scrollTo(0, 0);
             messageView.announceForAccessibility(text);
         }
     }
@@ -176,23 +192,16 @@ final class PixelModelSheet {
         for (int i = 0; i < currentAccounts.size(); i++) {
             final int index = i;
             final String label = currentAccounts.get(i);
-            final boolean isSelected = (i == selectedAccount);
 
             TextView chip = new TextView(ui);
             chip.setText(label);
             chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             chip.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             chip.setGravity(Gravity.CENTER);
-            chip.setSingleLine(true);
+            chip.setMaxLines(1);
             chip.setPadding(dp(16), dp(6), dp(16), dp(6));
             chip.setMinimumHeight(dp(48));
 
-            int bgColor = isSelected ? PixelUi.color(ui, "primaryContainer") : PixelUi.color(ui, "surfaceContainerHigh");
-            int textColor = isSelected ? PixelUi.color(ui, "onPrimaryContainer") : PixelUi.color(ui, "onSurfaceVariant");
-            chip.setTextColor(textColor);
-            chip.setBackground(createTonalRipple(bgColor, PixelUi.color(ui, "primary"), dp(18)));
-
-            ProviderSettingsDialog.markChoice(chip, label, isSelected);
             chip.setFocusable(true);
             chip.setOnClickListener(v -> {
                 if (saving || index == selectedAccount) return;
@@ -204,7 +213,21 @@ final class PixelModelSheet {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMarginEnd(dp(8));
             accountsContainer.addView(chip, lp);
+            styleAccount(i);
         }
+    }
+
+    private void styleAccount(int index) {
+        if (index < 0 || index >= accountsContainer.getChildCount()) return;
+        TextView chip = (TextView) accountsContainer.getChildAt(index);
+        boolean selected = (index == selectedAccount);
+        int backgroundColor = PixelUi.color(ui, selected ? "primaryContainer" : "surfaceContainerHigh");
+        int textColor = PixelUi.color(ui, selected ? "onPrimaryContainer" : "onSurfaceVariant");
+
+        chip.setTextColor(textColor);
+        chip.setBackground(createTonalRipple(backgroundColor, PixelUi.color(ui, "primary"), dp(18)));
+
+        ProviderSettingsDialog.markChoice(chip, currentAccounts.get(index), selected);
     }
 
     private void rebuildModels() {

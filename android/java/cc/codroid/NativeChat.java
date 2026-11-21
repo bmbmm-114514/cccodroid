@@ -194,6 +194,15 @@ public class NativeChat {
 
         chatScrollView = new ScrollView(h.a);
         chatScrollView.setFillViewport(true);
+        chatScrollView.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> {
+            int oldHeight = ob - ot;
+            if (oldHeight <= 0 || r - l != or - ol || b - t == oldHeight) return;
+            ScrollView timeline = (ScrollView) view;
+            int contentHeight = timeline.getChildAt(0).getHeight();
+            if (oldHeight + timeline.getScrollY() >= contentHeight - h.dp(2)) {
+                timeline.scrollTo(0, contentHeight);
+            }
+        });
         chatScrollView.setClipToPadding(false);
         chatScrollView.setVerticalScrollBarEnabled(false);
         h.body.addView(chatScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -229,6 +238,9 @@ public class NativeChat {
         inputField.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         inputField.setMinLines(1);
         inputField.setMaxLines(5);
+        inputField.setImeOptions(inputField.getImeOptions()
+                | android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
         inputField.setMinHeight(h.dp(48));
         inputField.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         inputField.setBackground(null);
@@ -582,7 +594,8 @@ public class NativeChat {
             bookmarkTurn = null;
             chatScrollView.post(() -> chatScrollView.scrollTo(0, marked.getTop()));
         } else if (nearBottom) {
-            chatScrollView.post(() -> chatScrollView.fullScroll(View.FOCUS_DOWN));
+            ScrollView timeline = chatScrollView;
+            timeline.post(() -> timeline.scrollTo(0, timeline.getChildAt(0).getHeight()));
         }
     }
 

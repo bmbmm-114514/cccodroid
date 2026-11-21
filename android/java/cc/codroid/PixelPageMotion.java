@@ -1,5 +1,7 @@
 package cc.codroid;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -21,6 +23,7 @@ final class PixelPageMotion {
     private final View page;
     private final ImageView image;
     private final TextView title;
+    private ValueAnimator transition;
     private float progress;
     private boolean fromRight;
     private boolean tracking;
@@ -33,6 +36,7 @@ final class PixelPageMotion {
         this.page = page;
         Context c = page.getContext();
         int surface = PixelUi.color(c, "surface");
+        viewport.setBackgroundColor(surface);
         page.setBackgroundColor(surface);
         preview = new FrameLayout(c);
         preview.setBackgroundColor(surface);
@@ -101,13 +105,13 @@ final class PixelPageMotion {
         if (!tracking) return;
         progress = Math.max(0f, Math.min(1f, fraction));
         transform(page, progress, fromRight);
-        corner = PixelUi.dp(page.getContext(), 28) * progress;
-        page.setElevation(PixelUi.dp(page.getContext(), 5) * progress);
-        page.setClipToOutline(true);
-        page.invalidateOutline();
     }
 
     private void transform(View v, float fraction, boolean right) {
+        corner = PixelUi.dp(v.getContext(), 28) * fraction;
+        v.setClipToOutline(fraction > 0f);
+        v.invalidateOutline();
+        v.setElevation(PixelUi.dp(v.getContext(), 5) * fraction);
         float scale = 1f - fraction * .1f;
         v.setPivotX(v.getWidth() * .5f);
         v.setPivotY(v.getHeight() * .5f);
@@ -121,8 +125,8 @@ final class PixelPageMotion {
         if (!tracking) return;
         tracking = false;
         if (!enabled() || progress == 0) { reset(); return; }
-        page.animate().translationX(0).scaleX(1).scaleY(1).setDuration(150)
-                .setInterpolator(EASE).withEndAction(this::reset).start();
+        float start = progress;
+        animateFrames(150, f -> transform(page, start * (1f - EASE.getInterpolation(f)), fromRight));
     }
 
     void navigate(String oldRoute, String oldTitle, boolean back, boolean interactive, int direction) {
@@ -131,27 +135,50 @@ final class PixelPageMotion {
         reset();
         if (oldRoute.isEmpty() || !enabled()) return;
         showFrame(oldRoute, oldTitle);
-        if (back) {
+        if (back && interactive) {
             preview.bringToFront();
             transform(preview, initial, right);
-            corner = PixelUi.dp(page.getContext(), 28) * initial;
-            preview.setClipToOutline(true);
-            preview.invalidateOutline();
-            float end = (right ? -1 : 1) * Math.min(page.getWidth() * .34f, PixelUi.dp(page.getContext(), 160));
-            preview.animate().translationX(end).scaleX(.91f).scaleY(.91f).alpha(0f)
-                    .setDuration(160).setInterpolator(EASE).withEndAction(this::reset).start();
+            float startX = preview.getTranslationX();
+            float endX = (right ? -1 : 1) * page.getWidth();
+            animateFrames(180, f -> preview.setTranslationX(startX + (endX - startX) * EASE.getInterpolation(f)));
         } else {
             page.bringToFront();
-            page.setTranslationX(direction * PixelUi.dp(page.getContext(), 32));
-            page.setAlpha(0f);
-            page.animate().translationX(0).alpha(1).setDuration(220).setInterpolator(EASE)
-                    .withEndAction(this::reset).start();
+            float distance = (back ? -direction : direction) * PixelUi.dp(page.getContext(), 16);
+            animateFrames(220, f -> fadeThrough(preview, page, f, distance));
         }
     }
 
+    // Material fade-through hands the surface from one page to the next before its text appears.
+    private static void fadeThrough(View outgoing, View incoming, float fraction, float distance) {
+        float exit = Math.min(1f, fraction / .35f);
+        float enter = EASE.getInterpolation(Math.max(0f, (fraction - .35f) / .65f));
+        outgoing.setAlpha(1f - exit);
+        incoming.setAlpha(enter);
+        incoming.setTranslationX(distance * (1f - enter));
+    }
+
+    private void animateFrames(long duration, java.util.function.Consumer<Float> frame) {
+        transition = ValueAnimator.ofFloat(0f, 1f);
+        transition.setInterpolator(null);
+        transition.setDuration(duration);
+        frame.accept(0f);
+        transition.addUpdateListener(a -> frame.accept((Float) a.getAnimatedValue()));
+        transition.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator animator) {
+                if (transition == animator) reset();
+            }
+        });
+        transition.start();
+    }
+
     void reset() {
-        page.animate().withEndAction(null).cancel();
-        preview.animate().withEndAction(null).cancel();
+        if (transition != null) {
+            ValueAnimator active = transition;
+            transition = null;
+            active.removeAllListeners();
+            active.removeAllUpdateListeners();
+            active.cancel();
+        }
         for (View v : new View[]{page, preview}) {
             v.setTranslationX(0f);
             v.setScaleX(1f);

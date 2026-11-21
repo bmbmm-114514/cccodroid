@@ -36,6 +36,7 @@ public class NativeHome {
     private final ImageButton leading;
     private NavigationBarView navigation;
     private boolean rail;
+    private final NativeImeLayout ime;
     private MaterialButton modelChip;
     final LinearLayout body;
     final Runnable chooseTheme;
@@ -63,7 +64,7 @@ public class NativeHome {
 
         root = new LinearLayout(a);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setFitsSystemWindows(true);
+        ime = new NativeImeLayout(root, this::syncBack);
         root.setBackgroundColor(PixelUi.color(a,"surface"));
         shell = new LinearLayout(a);
         shell.setOrientation(LinearLayout.HORIZONTAL);
@@ -113,18 +114,7 @@ public class NativeHome {
             boolean wide = r-l >= dp(600);
             if (!disposed && wide != rail) root.post(() -> { if (!disposed) configureNavigation(root.getWidth() >= dp(600)); });
         });
-        root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-            if (disposed || rail || navigation == null) return;
-            boolean ime;
-            if (android.os.Build.VERSION.SDK_INT >= 30 && root.getRootWindowInsets() != null) {
-                ime = root.getRootWindowInsets().isVisible(android.view.WindowInsets.Type.ime());
-            } else {
-                android.graphics.Rect visible = new android.graphics.Rect();
-                root.getWindowVisibleDisplayFrame(visible);
-                ime = root.getRootView().getHeight() - visible.bottom > dp(140);
-            }
-            navigation.setVisibility(ime ? View.GONE : View.VISIBLE);
-        });
+        ime.attach(a.getWindow());
         a.setContentView(this.root);
         chatId = a.getSharedPreferences("native-ui", 0).getString("conversation", "");
         projectId = a.getSharedPreferences("native-ui", 0).getString("project", "");
@@ -140,6 +130,7 @@ public class NativeHome {
         navigation = PixelNav.make(this,wide);
         if (wide) shell.addView(navigation,0,new LinearLayout.LayoutParams(-2,-1));
         else root.addView(navigation,new LinearLayout.LayoutParams(-1,-2));
+        ime.setBottomBar(wide ? null : navigation);
     }
 
     private boolean primary(String id) {
@@ -242,14 +233,15 @@ public class NativeHome {
     boolean canGoBack() { return !disposed && !history.isEmpty(); }
 
     private void syncBack() {
-        if (canGoBack() && detachBack == null) {
+        boolean handlesBack = canGoBack() && !ime.isVisible();
+        if (handlesBack && detachBack == null) {
             detachBack = PixelBack.attach(a, new PixelBack.Handler() {
                 @Override public void start(boolean right) { startBack(right); }
                 @Override public void progress(float fraction) { progressBack(fraction); }
                 @Override public void cancel() { cancelBack(); }
                 @Override public void commit() { commitBack(); }
             });
-        } else if (!canGoBack() && detachBack != null) {
+        } else if (!handlesBack && detachBack != null) {
             detachBack.run();
             detachBack = null;
         }
@@ -332,6 +324,7 @@ public class NativeHome {
 
     public boolean back() {
         if (disposed) return false;
+        if (ime.hide()) return true;
         while (!history.isEmpty()) {
             String prev = history.pop();
             if (prev != null && !prev.isEmpty() && !prev.equals(screen)) {
@@ -351,6 +344,7 @@ public class NativeHome {
         history.clear();
         syncBack();
         motion.dispose();
+        ime.detach();
         body.removeAllViews();
         root.removeAllViews();
     }

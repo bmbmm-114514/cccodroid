@@ -1,5 +1,6 @@
 package cc.codroid;
 
+import android.util.ArrayMap;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -31,6 +32,9 @@ final class NativeEnergyPanel {
 
     private final NativeHome h;
     private final LinearLayout battery, samples, bill;
+    private final ArrayMap<String, JSONArray> periods = new ArrayMap<>();
+    private final TextView historyStatus;
+    private String displayedPeriod, displayedBattery, displayedBill;
     private int energyRequest, billRequest;
 
     private NativeEnergyPanel(NativeHome h, LinearLayout page) {
@@ -62,6 +66,9 @@ final class NativeEnergyPanel {
             picker.addView(button, new LinearLayout.LayoutParams(0,-2,1));
             if (period[0].equals("day")) picker.check(button.getId());
         }
+        historyStatus = NativeStatusViews.detail(history, "");
+        historyStatus.setVisibility(View.GONE);
+        historyStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         samples = new LinearLayout(h.a);
         samples.setOrientation(LinearLayout.VERTICAL);
         history.addView(samples, -1, -2);
@@ -109,23 +116,47 @@ final class NativeEnergyPanel {
 
     private void loadEnergy(String[] period) {
         final int ticket = ++energyRequest;
-        message(samples, "正在读取" + period[2] + "的记录…");
+        String key = period[0];
+        JSONArray cached = periods.get(key);
+        historyStatus.setOnClickListener(null);
+        historyStatus.setClickable(false);
+        historyStatus.setVisibility(View.GONE);
+        if (cached != null && !key.equals(displayedPeriod)) renderSamples(period, cached);
+        if (displayedPeriod == null) {
+            historyStatus.setText("正在读取" + period[2] + "的记录…");
+            historyStatus.setVisibility(View.VISIBLE);
+        }
         if (battery.getChildCount() == 0) message(battery, "正在读取电池状态…");
-        h.req("GET", "/api/energy?view=" + period[0], null, data -> {
+        h.req("GET", "/api/energy?view=" + key, null, data -> {
             if (ticket != energyRequest) return;
             if (!data.optBoolean("ok")) {
-                message(samples, data.optString("message", "无法读取耗电记录"));
-                message(battery, "电池状态未知");
+                historyError(period, data.optString("message", "无法读取耗电记录"));
                 return;
             }
-            renderBattery(data.optJSONObject("battery"));
-            renderSamples(period, data.optJSONArray("bars"));
+            historyStatus.setVisibility(View.GONE);
+            JSONArray bars = data.optJSONArray("bars");
+            if (bars == null) bars = new JSONArray();
+            JSONArray previous = periods.put(key, bars);
+            if (!key.equals(displayedPeriod) || previous == null || !bars.toString().equals(previous.toString())) {
+                renderSamples(period, bars);
+            }
+            JSONObject state = data.optJSONObject("battery");
+            String batteryKey = String.valueOf(state);
+            if (!batteryKey.equals(displayedBattery)) {
+                displayedBattery = batteryKey;
+                renderBattery(state);
+            }
             if (billRequest == 0 && data.optJSONObject("sys") != null) renderBill(data.optJSONObject("sys"));
         }, error -> {
-            if (ticket != energyRequest) return;
-            message(samples, "无法读取耗电记录 · " + error);
-            message(battery, "电池状态未知");
+            if (ticket == energyRequest) historyError(period, error);
         });
+    }
+
+    private void historyError(String[] period, String error) {
+        historyStatus.setOnClickListener(v -> loadEnergy(period));
+        historyStatus.setText(period[2] + " · " + error + " · 点按重试");
+        historyStatus.setVisibility(View.VISIBLE);
+        if (displayedBattery == null) message(battery, "电池状态未知");
     }
 
     private static String number(double value, String unit) {
@@ -147,6 +178,7 @@ final class NativeEnergyPanel {
     }
 
     private void renderSamples(String[] period, JSONArray bars) {
+        displayedPeriod = period[0];
         samples.removeAllViews();
         NativeStatusViews.detail(samples, period[2]);
         if (bars == null || bars.length() == 0) { NativeStatusViews.detail(samples, "暂无采样"); return; }
@@ -157,7 +189,8 @@ final class NativeEnergyPanel {
                     ? DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(bar.optLong("t")))
                     : bar.optString("t", "未知时段");
             if (bar.isNull("c") && bar.isNull("s") && bar.isNull("f") && bar.isNull("d")) {
-                NativeStatusViews.metric(samples, name, "暂无采样");
+                TextView value = NativeStatusViews.metric(samples, name, "暂无采样");
+                ((View) value.getParent()).setMinimumHeight(h.dp(56));
                 continue;
             }
             PixelUi.row(samples, "schedule", name, "", () -> showSample(name, bar));
@@ -176,6 +209,7 @@ final class NativeEnergyPanel {
 
     private void loadBill() {
         final int ticket = ++billRequest;
+        displayedBill = null;
         message(bill, "正在向系统查询…");
         h.req("POST", "/api/energy/system", NativeHome.json(), result -> {
             if (ticket != billRequest) return;
@@ -188,6 +222,9 @@ final class NativeEnergyPanel {
     }
 
     private void renderBill(JSONObject report) {
+        String signature = report.toString();
+        if (signature.equals(displayedBill)) return;
+        displayedBill = signature;
         bill.removeAllViews();
         JSONObject me = report.optJSONObject("me");
         if (me == null) NativeStatusViews.detail(bill, "本应用尚无耗电记录");

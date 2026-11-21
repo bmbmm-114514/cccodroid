@@ -1,8 +1,10 @@
 package cc.codroid;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.os.Looper;
 import android.view.View;
+import android.view.ViewGroup;
 import java.time.Duration;
 import java.util.function.Consumer;
 import org.json.JSONObject;
@@ -13,6 +15,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.util.ReflectionHelpers;
 import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
 
@@ -87,6 +90,41 @@ public class NativeNavigationMotionTest {
             assertEquals("chat", home.screen);
             assertFalse(home.canGoBack());
             assertEquals("未发送的内容", NativeChat.readThemeDraft(home.a, home.chatId));
+        } finally {
+            home.dispose();
+        }
+    }
+
+    @Test public void tabChangesHandOffTextBeforeShowingTheNextPage() {
+        NativeHome home = newHome();
+        try {
+            View page = (View) home.body.getParent();
+            ViewGroup viewport = (ViewGroup) page.getParent();
+            View snapshot = viewport.getChildAt(0);
+            assertNotSame(snapshot, page);
+            PixelPageMotion motion = ReflectionHelpers.getField(home, "motion");
+            for (String destination : new String[]{"settings", "chat"}) {
+                home.selectTab(destination);
+                layout(home);
+                assertEquals(View.VISIBLE, snapshot.getVisibility());
+                assertEquals(0f, page.getAlpha(), 0f);
+                boolean outgoingFaded = false;
+                boolean incomingFaded = false;
+                ValueAnimator transition = ReflectionHelpers.getField(motion, "transition");
+                for (int percent = 0; percent < 100; percent++) {
+                    transition.setCurrentFraction(percent / 100f);
+                    float old = snapshot.getAlpha(), next = page.getAlpha();
+                    assertTrue("both pages have visible text", old == 0f || next == 0f);
+                    outgoingFaded |= old > 0f && old < 1f;
+                    incomingFaded |= next > 0f && next < 1f;
+                }
+                transition.end();
+                assertTrue(outgoingFaded);
+                assertTrue(incomingFaded);
+                assertEquals(View.INVISIBLE, snapshot.getVisibility());
+                assertEquals(1f, page.getAlpha(), 0f);
+                assertEquals(0f, page.getTranslationX(), 0f);
+            }
         } finally {
             home.dispose();
         }

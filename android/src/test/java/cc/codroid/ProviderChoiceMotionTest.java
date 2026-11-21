@@ -2,6 +2,7 @@ package cc.codroid;
 
 import android.app.Activity;
 import android.os.Looper;
+import android.view.View;
 import android.widget.LinearLayout;
 import androidx.activity.BackEventCompat;
 import androidx.activity.OnBackPressedDispatcher;
@@ -32,7 +33,8 @@ public class ProviderChoiceMotionTest {
         LinearLayout content = new LinearLayout(activity);
         page.setContentView(content);
         page.show();
-        content.layout(0, 0, 320, 640);
+        View surface = (View) content.getParent();
+        surface.layout(0, 0, 320, 640);
         AtomicInteger writes = new AtomicInteger();
         BottomSheetDialog picker = PixelChoiceSheet.show(activity, "选择 API 接口",
                 Arrays.asList("Claude API Key", "DeepSeek"), 1, index -> writes.incrementAndGet(), null);
@@ -48,15 +50,15 @@ public class ProviderChoiceMotionTest {
         OnBackPressedDispatcher back = page.getOnBackPressedDispatcher();
         back.dispatchOnBackStarted(new BackEventCompat(0, 80, 0f, BackEventCompat.EDGE_LEFT));
         back.dispatchOnBackProgressed(new BackEventCompat(64, 80, .6f, BackEventCompat.EDGE_LEFT));
-        assertTrue(content.getTranslationX() > 0);
+        assertTrue(surface.getTranslationX() > 0);
         back.dispatchOnBackCancelled();
         settle();
-        assertEquals(0f, content.getTranslationX(), .1f);
+        assertEquals(0f, surface.getTranslationX(), .1f);
         assertTrue(page.isShowing());
 
         back.dispatchOnBackStarted(new BackEventCompat(320, 80, 0f, BackEventCompat.EDGE_RIGHT));
         back.dispatchOnBackProgressed(new BackEventCompat(240, 80, .8f, BackEventCompat.EDGE_RIGHT));
-        assertTrue(content.getTranslationX() < 0);
+        assertTrue(surface.getTranslationX() < 0);
         back.onBackPressed();
         settle();
         assertFalse(page.isShowing());

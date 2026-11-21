@@ -19,15 +19,19 @@ final class PixelChoiceSheet {
     private PixelChoiceSheet() {}
 
     // Measure against the dialog's current constraints so rotation and split-screen resize the sheet.
-    static LinearLayout content(Context ui) {
+    static LinearLayout content(Context ui, boolean fixedHeight) {
         LinearLayout layout = new LinearLayout(ui) {
-            @Override protected void onMeasure(int widthSpec, int heightSpec) {
-                int height = MeasureSpec.getSize(heightSpec);
-                if (MeasureSpec.getMode(heightSpec) != MeasureSpec.UNSPECIFIED) {
-                    float fraction = height < PixelUi.dp(ui, 450) ? .92f : .8f;
-                    heightSpec = MeasureSpec.makeMeasureSpec((int) (height * fraction), MeasureSpec.AT_MOST);
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                int mode = MeasureSpec.getMode(heightMeasureSpec);
+                if (mode != MeasureSpec.UNSPECIFIED) {
+                    int parentHeight = MeasureSpec.getSize(heightMeasureSpec);
+                    float ratio = parentHeight < PixelUi.dp(ui, 450) ? 0.92f : 0.80f;
+                    int targetHeight = (int) (parentHeight * ratio);
+                    int targetMode = fixedHeight ? MeasureSpec.EXACTLY : MeasureSpec.AT_MOST;
+                    heightMeasureSpec = MeasureSpec.makeMeasureSpec(targetHeight, targetMode);
                 }
-                super.onMeasure(widthSpec, heightSpec);
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
             }
         };
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -59,7 +63,7 @@ final class PixelChoiceSheet {
     static BottomSheetDialog show(Context ui, String title, List<String> labels, int checked,
                                   IntConsumer choose, Runnable addCustom) {
         BottomSheetDialog dialog = createDialog(ui);
-        LinearLayout root = content(ui);
+        LinearLayout root = content(ui, false);
         final Runnable[] pending = new Runnable[1];
         dialog.setOnDismissListener(ignored -> {
             if (pending[0] != null) pending[0].run();
