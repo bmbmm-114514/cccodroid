@@ -204,12 +204,14 @@ final class NativeFiles {
         makeTabButton(h, navBar, isModified ? "编辑器 *" : "编辑器", activeMode == MODE_EDITOR, () -> h.nav("editor"));
         makeTabButton(h, navBar, "Git", activeMode == MODE_GIT, () -> h.nav("git"));
         makeTabButton(h, navBar, "终端", activeMode == MODE_TERM, () -> h.nav("terminal"));
-        LinearLayout panel = h.body;
-        if (activeMode == MODE_TERM && !termLoading && activeTermId != null && pageError.isEmpty()) {
-            panel = new NativeTerminalLayout(h.a);
+        if (activeMode == MODE_TERM && pageError.isEmpty()) {
+            NativeTerminalLayout panel = new NativeTerminalLayout(h.a);
             h.body.addView(panel, new LinearLayout.LayoutParams(-1, -1));
+            panel.addView(navBar);
+            renderTermView(h, panel, navBar);
+            return;
         }
-        panel.addView(navBar);
+        h.body.addView(navBar);
 
         if (!pageError.isEmpty()) {
             h.text(h.body, pageError);
@@ -227,9 +229,6 @@ final class NativeFiles {
                 break;
             case MODE_GIT:
                 renderGitView(h);
-                break;
-            case MODE_TERM:
-                renderTermView(h, panel, navBar);
                 break;
         }
     }
@@ -365,7 +364,7 @@ final class NativeFiles {
         headerGroup.addView(overflowBtn);
 
         if (filesLoading) {
-            renderLoading(h, "正在读取目录列表...");
+            renderLoading(h, h.body, "正在读取目录列表...");
             return;
         }
 
@@ -693,7 +692,7 @@ final class NativeFiles {
         addDivider(h, h.body);
 
         if (editorLoading) {
-            renderLoading(h, "正在加载文件内容...");
+            renderLoading(h, h.body, "正在加载文件内容...");
             return;
         }
 
@@ -915,7 +914,7 @@ final class NativeFiles {
         addDivider(h, h.body);
 
         if (gitLoading) {
-            renderLoading(h, "正在读取 Git 仓库状态...");
+            renderLoading(h, h.body, "正在读取 Git 仓库状态...");
             return;
         }
 
@@ -1128,7 +1127,7 @@ final class NativeFiles {
     // 4. 原生终端面板 (PTY 会话 / SSE 回放与流 / 虚拟控制键 / 输入)
     // =========================================================================
 
-    private void renderTermView(NativeHome h, LinearLayout panel, View navBar) {
+    private void renderTermView(NativeHome h, NativeTerminalLayout panel, View navBar) {
         LinearLayout topBar = new LinearLayout(h.a);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -1195,16 +1194,16 @@ final class NativeFiles {
         View divider = addDivider(h, panel);
 
         if (termLoading) {
-            renderLoading(h, "正在同步终端会话...");
+            renderLoading(h, panel, "正在同步终端会话...");
             return;
         }
 
         if (!termAvailable && termSessions.isEmpty()) {
-            h.text(h.body, "当前运行环境没有可用的终端组件。");
+            h.text(panel, "当前运行环境没有可用的终端组件。");
             return;
         }
         if (activeTermId == null) {
-            h.button(h.body, "新建终端", () -> createTerm(h));
+            h.button(panel, "新建终端", () -> createTerm(h));
             return;
         }
         final String sessionId = activeTermId;
@@ -1236,7 +1235,7 @@ final class NativeFiles {
         panel.addView(termScrollView);
 
         View keys = TerminalControls.add(panel, input);
-        ((NativeTerminalLayout) panel).bind(navBar, topBar, divider, termScrollView, termTextView, keys);
+        panel.bind(navBar, topBar, divider, termScrollView, termTextView, keys);
     }
 
     private void createTerm(NativeHome h) {
@@ -1542,7 +1541,7 @@ final class NativeFiles {
         return createPixelBtn(h, title, "surfaceContainerHigh", "onSurfaceVariant", 18, 8, 4, 13, 48, act);
     }
 
-    private static void renderLoading(NativeHome h, String tip) {
+    private static void renderLoading(NativeHome h, LinearLayout parent, String tip) {
         LinearLayout box = new LinearLayout(h.a);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
@@ -1558,7 +1557,7 @@ final class NativeFiles {
         tv.setTextColor(PixelUi.color(h.a, "onSurfaceVariant"));
         box.addView(tv);
 
-        h.body.addView(box);
+        parent.addView(box);
     }
 
     private static String basename(String path) {
