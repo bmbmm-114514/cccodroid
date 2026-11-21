@@ -53,6 +53,17 @@ export const PATHS = {
   projects: path.join(CFG.home, ".claude", "projects"),
 };
 
+/** seccomp 监督器：cccodroid 在 APK 原生库目录（libccenosysrun.so，Env.java 经 CCAPP_ENOSYS_RUN 交来），开发端在 files/devbin */
+let ENOSYS_RUN;
+export function enosysRun() {
+  if (ENOSYS_RUN !== undefined) return ENOSYS_RUN;
+  const cands = [process.env.CCAPP_ENOSYS_RUN,
+    PATHS.preload && path.join(path.dirname(PATHS.preload), "seccomp-enosys-run"),
+    path.join(CFG.home, "..", "devbin", "seccomp-enosys-run")].filter(Boolean);
+  ENOSYS_RUN = cands.find((p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; } }) || "";
+  return ENOSYS_RUN;
+}
+
 // 给 glibc 程序 --preload 的库（冒号分隔）。经加载器时 Env.java 给的是 seccomp-enosys.so + exec-shim.so
 export const GLIBC_PRELOAD = process.env.CCAPP_GLIBC_PRELOAD || (PATHS.preload && fs.existsSync(PATHS.preload) ? PATHS.preload : "");
 /** glibc 进程的环境：摘掉 LD_PRELOAD —— 经加载器时网关环境里挂着 termux-exec（bionic 库），glibc 的 ld.so 读到直接报 invalid ELF header */

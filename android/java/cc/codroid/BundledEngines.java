@@ -54,7 +54,15 @@ final class BundledEngines {
         File dir = new File(env.home, ".local/share/multi-agent");
         Files.createDirectories(dir.toPath());
         JSONObject codex = pins.getJSONObject("codex"), agy = pins.getJSONObject("agy");
-        installFile(assets, "Codex", "codex.tar.gz", codex, new File(dir, "codex-app-server-" + codex.getString("version")), true, ins, checked);
+        installFile(assets, "Codex", "codex.tar.gz", codex, new File(dir, "codex-" + codex.getString("version")), true, ins, checked);
+        // 0.1.x used the standalone server. Reclaim its space only after the full client is ready.
+        File oldServer = new File(dir, "codex-app-server-0.166.0");
+        try {
+            if (Files.isRegularFile(oldServer.toPath(), LinkOption.NOFOLLOW_LINKS) && oldServer.length() == 214949224L
+                    && Installer.sha256(oldServer).equals("f21b0b95117d4f32151abe78d8030cc1175e877fe741deaaea46451f2b51ade2")) {
+                Files.delete(oldServer.toPath());
+            }
+        } catch (IOException ignored) { /* The current client is ready even if cleanup must wait. */ }
         installFile(assets, "Antigravity", "agy.tar.gz", agy, new File(dir, "agy-" + agy.getString("version")), true, ins, checked);
     }
 

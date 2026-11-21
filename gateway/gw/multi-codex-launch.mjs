@@ -3,9 +3,8 @@ import path from "node:path";
 import net from "node:net";
 import http from "node:http";
 import { randomBytes } from "node:crypto";
-import { CFG, PREFIX, glibcEnv } from "./config.mjs";
-import { enosysRun } from "./claude.mjs";
-import { verifiedCodex } from "./multi-codex-install.mjs";
+import { CFG, PREFIX, enosysRun, glibcEnv } from "./config.mjs";
+import { verifiedCodex } from "./multi-binary.mjs";
 
 let tunnel;
 // Android's resolver lives in bionic. Let the gateway resolve CONNECT destinations for
@@ -36,14 +35,14 @@ function androidTunnel() {
   return tunnel;
 }
 
-export async function codexOptions({ home = CFG.home, verifyBinary = verifiedCodex } = {}) {
+export async function codexOptions({ home = CFG.home, verifyBinary = verifiedCodex, terminal = false } = {}) {
   const binary = await verifyBinary();
   // An explicit CODEX_HOME must already exist when the official app-server starts.
   const profile = path.join(home, ".codex");
   const temp = path.join(profile, "tmp");
   await fs.promises.mkdir(temp, { recursive: true, mode: 0o700 });
   const env = glibcEnv();
-  for (const key of ["LD_LIBRARY_PATH", "NODE_OPTIONS", "NODE_PATH", "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"]) delete env[key];
+  for (const key of ["LD_LIBRARY_PATH", "NODE_OPTIONS", "NODE_PATH", "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY", "CCAPP_KEY_FILE", "CCAPP_TOKEN_FILE"]) delete env[key];
   env.HOME = home;
   env.CODEX_HOME = profile;
   env.TMPDIR = temp;
@@ -56,5 +55,7 @@ export async function codexOptions({ home = CFG.home, verifyBinary = verifiedCod
     env.NO_PROXY = [env.NO_PROXY, "127.0.0.1", "localhost", "::1"].filter(Boolean).join(",");
   }
   const wrapper = enosysRun();
-  return { command: wrapper || binary, args: wrapper ? ["-f", binary] : [], cwd: CFG.workspace, env };
+  const args = wrapper ? ["-f", binary] : [];
+  if (!terminal) args.push("app-server", "--listen", "stdio://");
+  return { command: wrapper || binary, args, cwd: terminal ? process.cwd() : CFG.workspace, env };
 }

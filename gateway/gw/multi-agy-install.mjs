@@ -6,30 +6,17 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
-import { CFG } from "./config.mjs";
+import { agyBinary as binary, verifiedAgy } from "./multi-binary.mjs";
+export { verifiedAgy };
 
 import { agyRelease } from "./engine-releases.mjs";
 export const agyVersion = agyRelease.version;
 const { archive: url, archiveBytes: size, archiveSha512: sha512, sha256: executableSha, bytes: binaryBytes } = agyRelease;
-const dir = path.join(CFG.home, ".local", "share", "multi-agent");
-const binary = path.join(dir, "agy-" + agyVersion);
-let verification = "", installing = null, error = "";
+const dir = path.dirname(binary);
+let installing = null, error = "";
 
 export function agyInstallation() {
   return { installed: fs.existsSync(binary), installing: !!installing, version: agyVersion, error };
-}
-
-export async function verifiedAgy() {
-  const info = await fs.promises.lstat(binary).catch(() => null);
-  if (!info?.isFile() || info.size !== binaryBytes) throw new Error("请安装或重新安装 Antigravity CLI");
-  const fingerprint = [info.ino, info.size, info.ctimeMs].join("/");
-  if (fingerprint !== verification) {
-    const hash = createHash("sha256");
-    for await (const part of fs.createReadStream(binary)) hash.update(part);
-    if (hash.digest("hex") !== executableSha) throw new Error("Antigravity CLI 校验失败，请重新安装");
-    verification = fingerprint;
-  }
-  return binary;
 }
 
 export async function unpackAgy(source, temp) {
@@ -73,7 +60,6 @@ async function download() {
     if (!response.ok || !response.body) throw new Error("下载 Antigravity 失败，HTTP " + response.status);
     await unpackAgy(response.body, temp);
     await fs.promises.rename(temp, binary);
-    verification = "";
   } finally { await fs.promises.rm(temp, { force: true }); }
 }
 

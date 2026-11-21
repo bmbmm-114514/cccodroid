@@ -1,8 +1,8 @@
 // Shared by the APK builder and the native launchers.
 export const codexRelease = {
-  version: "0.166.0", asset: "codex-app-server-aarch64-unknown-linux-musl",
-  archiveBytes: 88007340, archiveSha256: "3bc8dce2c2d8df023574736e7439ff834c3825d584dc79aa9b1f642023555bb1",
-  bytes: 214949224, sha256: "f21b0b95117d4f32151abe78d8030cc1175e877fe741deaaea46451f2b51ade2"
+  version: "0.166.0", asset: "codex-aarch64-unknown-linux-musl",
+  archiveBytes: 113382496, archiveSha256: "94eb707605ec2646b2e05b7edf7c4e7b3ccf02b16237c34ae9beb8cfb7f810a9",
+  bytes: 277549176, sha256: "f2e6c980c937e734644bed1b4a9a018d3e63a0ccbe71aafc85c86a8c6e4b462a"
 };
 export const codexArchive = `https://github.com/openai/codex/releases/download/rust-v${codexRelease.version}/${codexRelease.asset}.tar.gz`;
 export const agyRelease = {

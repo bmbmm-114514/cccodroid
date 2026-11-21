@@ -2,7 +2,8 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { CFG, GLIBC_PRELOAD, NO_BRIDGE, PATHS, PREFIX, glibcEnv, log, sleep, tz } from "./config.mjs";
+import { CFG, GLIBC_PRELOAD, NO_BRIDGE, PATHS, PREFIX, enosysRun, glibcEnv, log, sleep, tz } from "./config.mjs";
+export { enosysRun };
 import { SETTINGS, outputStyles } from "./settings-store.mjs";
 import { PROVIDER, keyOf } from "./providers.mjs";
 import { cachedModels, defaultCompactLine } from "./models.mjs";
@@ -391,16 +392,6 @@ export function claudeArgv(extra) {
   return ["--library-path", PATHS.claudeLib, ...pre, PATHS.claude, ...extra];
 }
 
-/** seccomp 监督器：cccodroid 在 APK 原生库目录（libccenosysrun.so，Env.java 经 CCAPP_ENOSYS_RUN 交来），开发端在 files/devbin */
-let ENOSYS_RUN;
-export function enosysRun() {
-  if (ENOSYS_RUN !== undefined) return ENOSYS_RUN;
-  const cands = [process.env.CCAPP_ENOSYS_RUN,
-    PATHS.preload && path.join(path.dirname(PATHS.preload), "seccomp-enosys-run"),
-    path.join(CFG.home, "..", "devbin", "seccomp-enosys-run")].filter(Boolean);
-  ENOSYS_RUN = cands.find((p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; } }) || "";
-  return ENOSYS_RUN;
-}
 /** 拉起 claude 的 [程序, 参数]：开着「静态程序兼容」就外面套一层监督器（跟进模式） */
 export function claudeCmd(extra) {
   // 发行版：开会话的一律加封口（--setting-sources "" 等，见 edition.mjs）。所有起 claude 的地方都经这里，别处不许自己拼

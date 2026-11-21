@@ -1,9 +1,10 @@
+import { personalEnv } from "./multi-agy-launch.mjs";
 // Native Google Antigravity CLI (ACP v1). Personal OAuth is completed by agy itself.
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { CFG, PREFIX } from "./config.mjs";
+import { CFG } from "./config.mjs";
 import { AgentTransport } from "./multi-rpc.mjs";
 import { holdMultiActivity } from "./runs.mjs";
 import { agyInstallation, startAgyInstall, verifiedAgy } from "./multi-agy-install.mjs";
@@ -13,14 +14,6 @@ const profile = path.join(CFG.home, ".gemini");
 const busy = new Set();
 const approvals = new Map();
 let currentLogin, confirmed = null, accountRevision = 0, usageRevision = 0;
-
-function personalEnv() {
-  const env = { ...process.env, HOME: CFG.home };
-  for (const key of ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_BASE_URL", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_GENAI_USE_VERTEXAI", "AGY_ADC_AUTH", "CCAPP_KEY_FILE", "CCAPP_TOKEN_FILE"]) delete env[key];
-  const cert = path.join(PREFIX, "etc", "tls", "cert.pem");
-  if (PREFIX && fs.existsSync(cert)) env.SSL_CERT_FILE ||= cert;
-  return env;
-}
 
 function authUrl(text) {
   for (const candidate of text.match(/https:\/\/[^\s<>"'\x1b]+/g) || []) {

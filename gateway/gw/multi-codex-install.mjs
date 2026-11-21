@@ -4,30 +4,17 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
-import { CFG } from "./config.mjs";
+import { codexBinary, verifiedCodex } from "./multi-binary.mjs";
+export { codexBinary, verifiedCodex };
 
 import { codexRelease, codexArchive as url } from "./engine-releases.mjs";
 const { asset, archiveBytes: archiveSize, archiveSha256: archiveHash, sha256: executableHash } = codexRelease;
-const dir = path.join(CFG.home, ".local", "share", "multi-agent");
-export const codexBinary = path.join(dir, "codex-app-server-" + codexRelease.version);
+const dir = path.dirname(codexBinary);
 
-let task = null, error = "", checked = "";
+let task = null, error = "";
 export function installation() {
   return { installed: fs.existsSync(codexBinary), installing: !!task, error };
 }
-export async function verifiedCodex() {
-  const st = await fs.promises.lstat(codexBinary);
-  const key = [st.ino, st.size, st.ctimeMs].join("/");
-  if (key !== checked) {
-    const hash = crypto.createHash("sha256");
-    if (!st.isFile()) throw new Error("Codex 引擎不是普通文件");
-    for await (const chunk of fs.createReadStream(codexBinary)) hash.update(chunk);
-    if (hash.digest("hex") !== executableHash) throw new Error("Codex 引擎校验失败，请重新安装");
-    checked = key;
-  }
-  return codexBinary;
-}
-
 // The pinned OpenAI archive has a single regular file. Extract only its contents;
 // names and paths from the archive are never used as filesystem destinations.
 export async function unpackCodex(source, target) {
@@ -47,7 +34,7 @@ export async function unpackCodex(source, target) {
         if (header.length < 512) continue;
         if (header.toString("ascii", 0, asset.length + 1) !== asset + "\0" || header[156] !== 48) throw new Error("Codex 归档格式不匹配");
         remaining = parseInt(header.toString("ascii", 124, 136), 8);
-        if (!Number.isSafeInteger(remaining) || remaining < 1 || remaining > 400 * 1024 * 1024) throw new Error("Codex 文件大小不匹配");
+        if (remaining !== codexRelease.bytes) throw new Error("Codex 文件大小不匹配");
         chunk = header.subarray(512);
         header = Buffer.alloc(0);
       }
@@ -70,7 +57,6 @@ async function install() {
     if (!response.ok || !response.body) throw new Error("下载 Codex 失败，HTTP " + response.status);
     await unpackCodex(response.body, target);
     await fs.promises.rename(target, codexBinary);
-    checked = "";
   } finally { await fs.promises.rm(target, { force: true }); }
 }
 export function startInstall() {

@@ -1,0 +1,2 @@
+#!/system/bin/sh
+exec node "$(dirname "$0")/../gw/multi-terminal.mjs" agy "$@"
