@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import fs from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { runAgy, respondAgy, handoffAgy, loginAgy, agyState, stopAgyLogin } from "../gw/multi-agy.mjs";
+import { agyModels, runAgy, respondAgy, handoffAgy, loginAgy, agyState, stopAgyLogin } from "../gw/multi-agy.mjs";
 import { unpackAgy } from "../gw/multi-agy-install.mjs";
 import { CFG } from "../gw/config.mjs";
 import { multiBusy } from "../gw/runs.mjs";
@@ -139,4 +139,40 @@ test("Android installer rejects unverified or malformed archive",async()=>{
  try {
   await assert.rejects(unpackAgy(Readable.from([gzipSync(Buffer.alloc(512))]),path.join(dir,"candidate")),/格式异常/);
  } finally { await fs.promises.rm(dir,{recursive:true,force:true}); }
+});
+
+test("Antigravity model picker uses the native ACP selector and switches before sending the prompt", async () => {
+  function modelOption(currentValue) {
+    return [{type:"select",category:"model",id:"actual-model-selector",currentValue,options:[
+      {group:"gemini",options:[{value:"first",name:"First"},{value:"second",name:"Second"}]},
+    ]}];
+  }
+  let restored = "first", effective = null;
+  const { options, calls } = fake((child, msg) => {
+    if (msg.method === "session/new" || msg.method === "session/resume") {
+      effective = msg.method === "session/new" ? "first" : restored;
+      child.answer(msg, {sessionId:msg.params.sessionId || "metadata",configOptions:modelOption(effective)});
+      return true;
+    }
+    if (msg.method === "session/set_config_option") {
+      assert.equal(msg.params.configId,"actual-model-selector");
+      effective=msg.params.value;
+      child.answer(msg,{configOptions:modelOption(effective)});
+      return true;
+    }
+    if (msg.method === "session/close") { child.answer(msg,{}); return true; }
+    if (msg.method === "session/prompt") {
+      child.update(msg.params.sessionId,{sessionUpdate:"agent_message_chunk",content:{type:"text",text:effective}});
+      child.answer(msg,{stopReason:"end_turn"}); return true;
+    }
+  },{sessionCapabilities:{resume:{},close:{}}});
+  assert.deepEqual(await agyModels(options), { defaultModel:"first", models:[{id:"first",label:"First"},{id:"second",label:"Second"}] });
+  assert.ok(calls.some(m=>m.method==="session/close"));
+  assert.ok(!calls.some(m=>m.method==="session/prompt"));
+  assert.equal((await runAgy({...turn,sessionId:"old",model:"second"},options)).text,"second");
+  restored="second";
+  assert.equal((await runAgy({...turn,sessionId:"old",model:""},options)).text,"first");
+  const previousPrompts = calls.filter(m=>m.method==="session/prompt").length;
+  await assert.rejects(runAgy({...turn,sessionId:"old",model:"unavailable"},options),/未提供所选模型/);
+  assert.equal(calls.filter(m=>m.method==="session/prompt").length,previousPrompts);
 });

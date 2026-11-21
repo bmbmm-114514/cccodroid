@@ -731,7 +731,6 @@
   }
   function pausePageReads(name, leaving) {
     pageVisit++;
-    if (name === "multi") multiPause();
     if (name === "usage") clearTimeout(us.poll);
     if (name === "lineage") linPause(leaving);
     if (name === "ext") pauseExtReads();
@@ -739,7 +738,6 @@
   }
   function resumePageReads(name) {
     if (!name || !pageVisible(name)) return;
-    if (name === "multi") multiRefresh();
     if (name === "usage") { resumeUsage(); loadEnergy(); loadQuota(); loadAcctCard(false); }
     if (name === "lineage") { loadLineage(); pfResume(); }
     if (name === "ext") { loadModules(); loadComponents(); }
@@ -756,12 +754,12 @@
   });
   /** 打开整页：窄屏收起侧栏、盖住对话；宽屏侧栏照旧常驻，高亮当前项 */
   function openPage(name, cat) {
+    if (name === "multi") return closePage();
     if (!PAGES[name] || name === "settings") return openSettings(cat);
     OV.closeAll();
     const prev = curPage;
     if (prev && prev !== name) pausePageReads(prev, true);
     curPage = name;
-    document.documentElement.classList.toggle("pg-multi", name === "multi");
     document.documentElement.classList.add("pg-on");   // 整页盖着时藏起会话的上下文用量条（#39：小数缩放下整页上沿和顶栏差一丝，条会漏出来）
     document.documentElement.classList.toggle("pg-lineage", name === "lineage");   // 脉络页整页不滚（地图自己接手势）
     // 从对话进整页：窄屏从右边推进来（盖住对话），宽屏只在对话那一块浮上来；整页之间切换：新的那一页浮上来
@@ -786,7 +784,6 @@
     if (name === "help") loadHelp();
     if (name === "changelog") { loadChangelog(); loadChangelogVersion(); }
     if (name === "bookmarks") loadBookmarks();
-    if (name === "multi") multiRefresh();
     if (name === "usage") { loadQuota(); resumeUsage(); loadEnergy(); loadAcctCard(false); }
     if (name === "projects") { if (prev !== name && !PJ.cur) PJ.detail = null; renderProjects(); loadProjects(); loadSched(); }
     if (name === "sched") { renderSched(); loadSched(); loadProjects(); }
@@ -794,7 +791,6 @@
     if (name === "lineage") { if (prev !== name) linPickEnd(); if (LIN.g && LIN.map) linPaint(prev !== name); else linState(t("加载中…")); loadLineage(); }   // 头一回进：图还没取回来先说一声，别空白（#38）
   }
   function closePage() {
-    document.documentElement.classList.remove("pg-multi");
     if (!curPage) return;
     pausePageReads(curPage, true);
     curPage = null;

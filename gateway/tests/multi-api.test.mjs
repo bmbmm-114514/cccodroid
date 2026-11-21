@@ -32,6 +32,13 @@ test("multi HTTP imports public Claude turns once, restores its project, and ser
   assert.equal(original.status,201);
   const {id} = await original.json();
   assert.equal((await (await post("create",{claudeSessionId:sid})).json()).id,id);
+  assert.equal((await post("edit",{id,title:"Design B",pinned:true})).status,200);
+  const index = await (await fetch(base+"conversations")).json();
+  const row = index.conversations.find(c => c.id === id);
+  assert.equal(row.origin,sid);
+  assert.equal(row.nativeClaude,sid);
+  assert.equal(row.title,"Design B");
+  assert.equal(row.pinned,true);
   const state = await (await fetch(base+"state?id="+id)).json();
   assert.equal(state.conversation.activeAgent,"claude");
   assert.equal(state.conversation.turns.length,1);

@@ -20,7 +20,9 @@ export function recordTool(turn, label, text) {
     text: output.length > 4000 ? output.slice(0, 4000) + "\n…（已截断）" : output });
 }
 function summary(c) {
-  return { id: c.id, title: c.title, projectId: c.projectId, updatedAt: c.updatedAt };
+  return { id: c.id, title: c.title, projectId: c.projectId, cwd: c.cwd, updatedAt: c.updatedAt,
+    origin: c.origin || "", nativeClaude: c.sessions.claude || "", activeAgent: c.activeAgent,
+    created: c.turns[0]?.at || c.updatedAt, pinned: !!c.pinned };
 }
 
 export function conversationStore(dir, adapters, holdActivity = () => () => {}) {
@@ -83,10 +85,12 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
     if (!engines.has(agent) || !modes.has(mode) || typeof text !== "string" || !text.trim() || text.length > 100000 || typeof requestId !== "string" || !uuid.test(requestId)) {
       throw problem("消息、交接模式或请求编号无效");
     }
+    const destinationModel = input.destinationModel ?? "";
+    if (typeof destinationModel !== "string" || destinationModel.length > 200 || /[\x00-\x1f\x7f]/.test(destinationModel)) throw problem("目标模型名称无效");
     const c = read(id);
     const old = c.turns.find(t => t.requestId === requestId);
     if (old) {
-      if (old.user !== text || old.agent !== agent) throw problem("请求编号已用于其他消息", 409);
+      if (old.user !== text || old.agent !== agent || (old.model || "") !== destinationModel.trim()) throw problem("请求编号已用于其他消息", 409);
       return;
     }
     if (Array.from(jobs.values()).some(j => (c.projectId && c.projectId === j.c.projectId) ||
@@ -102,7 +106,7 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
     }
     if (switching && from === "agy" && mode !== "manual") throw problem("Antigravity 交接请手动选择需要的记录");
     if (switching && mode === "third-party" && !input.provider) throw problem("请选择交接模型接口");
-    const turn = { id: randomUUID(), requestId, agent, user: text, assistant: "", status: "running", at: Date.now() };
+    const turn = { id: randomUUID(), requestId, agent, model: destinationModel.trim(), user: text, assistant: "", status: "running", at: Date.now() };
     c.turns.push(turn);
     if (c.turns.length === 1 && c.title === "新对话") c.title = text.trim().slice(0, 60);
     save(c);
@@ -158,7 +162,7 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
       signal.throwIfAborted();
       j.stage = "running";
       const prompt = context ? "以下是之前会话的参考记录。\n" + JSON.stringify(context) + "\n\n用户本轮请求：\n" + turn.user : turn.user;
-      const result = await adapters[turn.agent].run({ sessionId: c.sessions[turn.agent], cwd: c.cwd, text: prompt, signal, onEvent: storeEvent });
+      const result = await adapters[turn.agent].run({ sessionId: c.sessions[turn.agent], cwd: c.cwd, model: turn.model, text: prompt, signal, onEvent: storeEvent });
       if (result.sessionId) c.sessions[turn.agent] = result.sessionId;
       if (result.text) turn.assistant = result.text;
       signal.throwIfAborted();
@@ -172,6 +176,12 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
       if (j.storageError) turn.error = j.storageError.message;
       save(c);
     }
+  }
+  function edit(id, changes) {
+    const c = read(id);
+    if (typeof changes.title === "string" && changes.title.trim()) c.title = changes.title.trim().slice(0, 96);
+    if (typeof changes.pinned === "boolean") c.pinned = changes.pinned;
+    save(c);
   }
   function stop(id) {
     const j = jobs.get(id);
@@ -194,6 +204,6 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
       save(j.c);
     }
   }
-  return { create, view, send, stop, approve, shutdown, list: () => [...summaries.values()].sort((a,b) => b.updatedAt-a.updatedAt),
+  return { create, view, send, stop, approve, shutdown, edit, list: () => [...summaries.values()].sort((a,b) => b.updatedAt-a.updatedAt),
     wait: id => jobs.get(id)?.done || Promise.resolve(), imported: sid => origins.get(sid) };
 }

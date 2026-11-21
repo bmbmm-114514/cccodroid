@@ -139,13 +139,104 @@ const acpInit = {
   clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
 };
 
-export async function runAgy({ sessionId, cwd, text, signal, onEvent }, options = {}) {
+function acpProcess(command, cwd, options, dispatch) {
+  return new AgentTransport({ ...options, cwd, command, args: ["acp", "--stdio"],
+    jsonrpc: "2.0", label: "Antigravity", env: options.env || personalEnv() }, dispatch, () => {});
+}
+async function initializePersonal(rpc) {
+  const revision = accountRevision;
+  const initialized = await rpc.request("initialize", acpInit);
+  if (!initialized.authMethods?.some(m => m.id === "oauth-personal")) throw new Error("Antigravity 未提供 Google 个人账号登录");
+  try { await rpc.request("authenticate", { methodId: "oauth-personal" }); }
+  catch (e) {
+    if (!/already (authenticated|authorized|logged in|signed in)/i.test(e.message)) {
+      if (revision === accountRevision) confirmed = false;
+      throw new Error("Google 个人账号验证失败：" + e.message);
+    }
+  }
+  if (revision !== accountRevision) throw new Error("Google 账号已切换，请重试");
+  confirmed = true;
+  return initialized;
+}
+
+function modelSelector(session) {
+  const selector = session?.configOptions?.find(o => o.category === "model" || o.id === "model");
+  const catalog = new Map();
+  function addOptions(options) {
+    for (const o of Array.isArray(options) ? options : []) {
+      if (Array.isArray(o?.options)) addOptions(o.options);
+      else if (typeof o?.value === "string" && o.value) catalog.set(o.value, { id: o.value, label: o.name || o.value });
+    }
+  }
+  addOptions(selector?.options);
+  if (selector) return { models: [...catalog.values()], defaultModel: selector.currentValue || "", configId: selector.id };
+  for (const m of session?.models?.availableModels || []) {
+    if (typeof m?.modelId === "string" && m.modelId) catalog.set(m.modelId, { id: m.modelId, label: m.name || m.modelId });
+  }
+  return { models: [...catalog.values()], defaultModel: session?.models?.currentModelId || "", configId: null };
+}
+
+let lastCatalog, catalogTask;
+async function readAgyCatalog(options) {
+  const command = options.command || await verifiedAgy();
+  const cwd = path.join(CFG.home, ".cache", "multi-agent", "model-catalog");
+  fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
+  let reported;
+  const rpc = acpProcess(command, cwd, { timeoutMs: 15000, ...options }, (transport, msg) => {
+    if (msg.id != null) {
+      if (msg.method === "session/request_permission") transport.send({ id: msg.id, result: { outcome: { outcome: "cancelled" } } });
+      else transport.send({ id: msg.id, error: { code: -32601, message: "Client capability not available" } });
+    } else if (msg.method === "session/update" && msg.params?.update?.sessionUpdate === "config_option_update") {
+      reported = msg.params.update;
+    }
+  });
+  try {
+    const init = await initializePersonal(rpc);
+    // The official selector is scoped to a client/session. A metadata-only session needs no model prompt.
+    const session = await rpc.request("session/new", { cwd, mcpServers: [] });
+    try {
+      const { models, defaultModel } = modelSelector(reported || session);
+      if (!models.length) throw new Error("Antigravity 未返回可选模型，请确认 Google 账号已登录");
+      return { models, defaultModel };
+    } finally {
+      if (session?.sessionId && init.agentCapabilities?.sessionCapabilities?.close) {
+        await rpc.request("session/close", { sessionId: session.sessionId });
+      }
+    }
+  } finally { rpc.close(); }
+}
+
+export async function agyModels(options = {}) {
+  const revision = accountRevision;
+  if (lastCatalog?.revision === revision && Date.now() - lastCatalog.at < 60000) return lastCatalog.result;
+  if (catalogTask?.revision === revision) return catalogTask.promise;
+  const promise = readAgyCatalog(options).then(result => {
+    if (revision !== accountRevision) throw new Error("Google 账号已切换，请刷新模型清单");
+    lastCatalog = { revision, result, at: Date.now() };
+    return result;
+  }).finally(() => { if (catalogTask?.promise === promise) catalogTask = null; });
+  catalogTask = { revision, promise };
+  return promise;
+}
+
+async function selectAgyModel(rpc, id, session, model) {
+  const selector = modelSelector(session);
+  if (!selector.models.some(m => m.id === model)) throw new Error("Antigravity 当前账号未提供所选模型：" + model);
+  if (selector.defaultModel === model) return;
+  const changed = selector.configId
+    ? await rpc.request("session/set_config_option", { sessionId: id, configId: selector.configId, value: model })
+    : await rpc.request("session/set_model", { sessionId: id, modelId: model });
+  const actual = modelSelector(changed).defaultModel;
+  if (actual && actual !== model) throw new Error("Antigravity 未采用所选模型：" + model);
+}
+
+export async function runAgy({ sessionId, cwd, text, model, signal, onEvent }, options = {}) {
   if (!path.isAbsolute(cwd || "") || typeof text !== "string" || !text.trim()) throw new Error("Antigravity 需要项目目录和消息");
   const stopped = () => Object.assign(new Error("Antigravity 回合已停止"), { name: "AbortError" });
   if (signal?.aborted) throw stopped();
   if (sessionId && busy.has(sessionId)) throw new Error("此 Antigravity 会话正在运行");
   if (sessionId) busy.add(sessionId);
-  let id = sessionId, rpc, prompting = false, abortTimer;
+  let id = sessionId, rpc, prompting = false, abortTimer, reportedSelector;
   const chunks = new Map(), full = new Set(), replayed = new Set(), tools = new Map();
   let anonymousFull = "";
   let seenText = "";
@@ -172,6 +263,7 @@ export async function runAgy({ sessionId, cwd, text, signal, onEvent }, options 
     if (msg.method !== "session/update" || (id && p.sessionId !== id)) return;
     const u = p.update || {};
     if (signal?.aborted) return;
+    if (u.sessionUpdate === "config_option_update") { reportedSelector = u; return; }
     const mid = u.messageId || "";
     if (!prompting) { if (mid) replayed.add(mid); return; }
     if (mid && replayed.has(mid)) return;
@@ -211,30 +303,37 @@ export async function runAgy({ sessionId, cwd, text, signal, onEvent }, options 
     const command = options.command || await verifiedAgy();
     if (signal?.aborted) throw stopped();
     fs.mkdirSync(profile, { recursive: true, mode: 0o700 });
-    rpc = new AgentTransport({ ...options, cwd, command, args: ["acp", "--stdio"],
-      jsonrpc: "2.0", label: "Antigravity", env: options.env || personalEnv() }, dispatch, () => {});
+    rpc = acpProcess(command, cwd, options, dispatch);
     signal?.addEventListener("abort", abort, { once: true });
-    const initialized = await rpc.request("initialize", acpInit);
-    if (!initialized.authMethods?.some(m => m.id === "oauth-personal")) throw new Error("Antigravity 未提供 Google 个人账号登录");
-    try { await rpc.request("authenticate", { methodId: "oauth-personal" }); }
-    catch (e) {
-      if (!/already (authenticated|authorized|logged in|signed in)/i.test(e.message)) {
-        confirmed = false; throw new Error("Google 个人账号验证失败：" + e.message);
-      }
-    }
-    confirmed = true;
+    const initialized = await initializePersonal(rpc);
     const context = { cwd, mcpServers: [] };
+    let session;
     if (id) {
       // 1.5.13 advertises resume (without replay). Never replace an existing thread with a new one.
       if (!initialized.agentCapabilities?.sessionCapabilities?.resume) throw new Error("当前 Antigravity 不支持无重放恢复原会话");
-      await rpc.request("session/resume", { ...context, sessionId: id });
+      session = await rpc.request("session/resume", { ...context, sessionId: id });
     } else {
-      const session = await rpc.request("session/new", context);
+      session = await rpc.request("session/new", context);
       id = session.sessionId;
       if (typeof id !== "string" || !id) throw new Error("Antigravity 未返回会话 ID");
       busy.add(id);
     }
     onEvent?.({ type: "thread", threadId: id, sessionId: id });
+    const catalog = reportedSelector || session;
+    const nativeModels = modelSelector(catalog);
+    if (!sessionId && nativeModels.models.length) {
+      const { models, defaultModel } = nativeModels;
+      lastCatalog = { revision: accountRevision, at: Date.now(), result: { models, defaultModel } };
+    }
+    // session/resume retains a previous explicit model. An explicit reset uses the
+    // model a new session with the same account/client gets, not that old override.
+    let selected = model;
+    if (sessionId && model === "" && nativeModels.models.length) {
+      const baseline = lastCatalog?.revision === accountRevision ? lastCatalog.result : await agyModels(options);
+      selected = baseline.defaultModel;
+    }
+    if (signal?.aborted) throw stopped();
+    if (selected) await selectAgyModel(rpc, id, catalog, selected);
     if (signal?.aborted) throw stopped();
     prompting = true;
     const result = await rpc.request("session/prompt", { sessionId: id, prompt: [{ type: "text", text }] }, 6 * 60 * 60_000);

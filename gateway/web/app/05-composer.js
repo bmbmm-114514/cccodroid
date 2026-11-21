@@ -37,6 +37,9 @@
       newConversation(t("已清空上下文，开始新会话"));
       return;
     }
+    if (typeof multiShouldSend === "function" && multiShouldSend()) {
+      return multiSendMain(text, fromInput);
+    }
     // 下面两个命令按用户打的字认（typed），不看接了附件引用的 text：带着附件时 /rename 会把 @路径 写进标题、
     // /login console 会被当成网页登录（11-04 报告 三）。附件留在附件栏里，下一条照常带上
     // 官方账户登录：OAuth 全程由 claude 自己完成，网关只转递授权页地址；授权码不经手（要贴码就在终端里贴给 claude）
@@ -195,6 +198,7 @@
   }
 
   async function abort() {
+    if (typeof multiChatActive === "function" && multiChatActive()) return multiStop();
     if (!srv.run) return;
     try { await api("/api/abort", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: srv.run.id }) }); }
     catch (e) { toast(e.message, true); }
@@ -470,7 +474,7 @@
   // 有字就发（忙时自动排队）；没字且正在生成 = 停止
   // 刚发出的那一下之后紧跟的第二下（双击、手抖）不算「停止」：不然会把刚发的这一轮杀掉（审查 v0.5.3 F1）。
   // 窗口只从点发送那一刻算 0.6 秒，且不再从 POST 回执重算——以前回执一慢，想停的时候全被吞掉（0.6.9 审计 196-聊天.3）
-  sendEl.addEventListener("click", () => (hasDraft() || !isBusy() ? send() : Date.now() - lastSendAt < 600 ? null : abort()));
+  sendEl.addEventListener("click", () => (multiChatActive() && multiBusy() ? abort() : hasDraft() || !isBusy() ? send() : Date.now() - lastSendAt < 600 ? null : abort()));
   interjectEl.addEventListener("click", interjectNow);
 
   // ── 递东西进来：上传 ──────────────────────────────────────────────

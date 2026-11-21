@@ -9,10 +9,24 @@
     const ok = latest("sessions");
     try {
       const lim = state.sessLimit || 150;   // 点过「再显示」就一直按加大后的数拉，刷新不缩回去
-      const r = await api(lim > 150 ? "/api/sessions?limit=" + lim : "/api/sessions");
+      const [r, main] = await Promise.all([
+        api(lim > 150 ? "/api/sessions?limit=" + lim : "/api/sessions"),
+        api("/api/multi/conversations"),
+      ]);
       if (!ok()) return true;
-      state.sessions = r.sessions || [];
-      state.sessTotal = r.total || state.sessions.length;
+      const integrated = main.conversations || [];
+      const linked = new Map();
+      for (const c of integrated) {
+        if (c.origin) linked.set(c.origin, "multi:" + c.id);
+        if (c.nativeClaude) linked.set(c.nativeClaude, "multi:" + c.id);
+      }
+      state.linkedClaude = linked;
+      const native = r.sessions || [];
+      const visible = native.filter(s => !linked.has(s.id));
+      const combined = integrated.map(c => ({ id: "multi:" + c.id, title: c.title, cwd: c.cwd, projectId: c.projectId,
+        mtime: c.updatedAt, created: c.created, pinned: c.pinned, agentChat: true, agent: c.activeAgent }));
+      state.sessions = [...visible, ...combined].sort((a, b) => b.mtime - a.mtime);
+      state.sessTotal = (r.total ?? native.length) - (native.length - visible.length) + combined.length;
       state.sessErr = "";
       if (sess.q.trim()) resessSearch(); else renderSessions();
       lineageDirty();
@@ -134,7 +148,7 @@
           ${s.snippet ? `<div class="it-snip">${markHit(s.snippet, q)}${s.count > 1 ? ` <span class="badge">${t("{n} 处", { n: s.count >= 99 ? "99+" : s.count })}</span>` : ""}</div>` : ""}
           <div class="it-meta">
             ${s.no ? `<span class="no">${esc(s.no)}</span>` : ""}<span title="${esc(t("更新 {time}", { time: new Date(s.mtime).toLocaleString() }) + (s.created ? " · " + t("创建 {time}", { time: new Date(s.created).toLocaleString() }) : ""))}">${s.no ? fmtRange(s.created, s.mtime) : fmtStamp(s.mtime)}</span>
-            <button class="ss-size" data-a="size">${fmtSize(s.sizeKb * 1024)}</button>
+            ${s.agentChat ? esc(multiName(s.agent) || "") : `<button class="ss-size" data-a="size">${fmtSize(s.sizeKb * 1024)}</button>`}
             ${st}
             ${pjOfCwd(s.cwd) ? pjMark(pjOfCwd(s.cwd)) : ""}
           </div>
@@ -148,7 +162,9 @@
       const byId = new Map(), needle = q.toLowerCase();
       // 同一 ID 可以在多个项目目录里；沿用 find 的首条优先级（最近修改的在前）。
       for (const s of state.sessions) if (!byId.has(s.id)) byId.set(s.id, s);
-      const list = (sess.hits || state.sessions.filter((s) => s.title.toLowerCase().includes(needle))).filter((h) => keep(byId.get(h.id) || h));
+      const local = state.sessions.filter(s => s.title.toLowerCase().includes(needle));
+      const matches = sess.hits ? [...local.filter(s => s.agentChat), ...sess.hits.filter(h => !state.linkedClaude?.has(h.id))] : local;
+      const list = matches.filter(h => keep(byId.get(h.id) || h) && (!picking || !h.agentChat));
       sess.visible = list.map((x) => x.id); pruneSel(); renderSessBar();
       box.innerHTML = (sess.hitsErr
           ? `<div class="tiny err">${esc(t("搜索失败：{msg}", { msg: sess.hitsErr }))} <button class="btn ghost sm" data-sess-search-retry>${esc(t("重试"))}</button></div>`
@@ -159,7 +175,7 @@
     }
     // 分组：置顶在最前，其余按时间；每组标题可点击折叠，收起时仍露出当前会话
     const groups = [];
-    const shown = state.sessions.filter(keep);
+    const shown = state.sessions.filter(s => keep(s) && (!picking || !s.agentChat));
     const pins = shown.filter((s) => s.pinned);
     if (pins.length) groups.push({ key: "pin", label: t("置顶"), list: pins });
     // 杂项（测试、试模型这类用完即弃的）收在最后一组，组名右边可一键全移进回收站

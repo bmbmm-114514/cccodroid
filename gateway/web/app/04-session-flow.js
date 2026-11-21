@@ -151,7 +151,7 @@
     if (view.sessionId !== prevSid) { replayCtx = null; view.cwd = null; updateCtx(0, state.ctxTotal); }
     // 同一个未发送的新会话重连：hello 不能冲掉刚选的接口；显式打开 / 新建仍清空。
     if (view.sessionId || !keepPendingModel) state.pendingModel = null;
-    refreshSessModel();                      // 模型标签换成这个会话自己的（打开、启动、重连都经过这里）
+    if (typeof multiChatActive !== "function" || !multiChatActive()) refreshSessModel();  // 模型标签换成这个会话自己的（打开、启动、重连都经过这里）
     view.gen++;
     WROTE.clear();                           // 写过的文件只认本会话的
     // 已答完的确认卡随旧视图一起放掉：只有还在文档里的卡才拿来挡重放，留着只会越攒越多（#95 01-007）；没答的留着，那一轮可能还在等
@@ -228,6 +228,7 @@
    *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"）
    *  opts.keepPage：不收起整页（网关那边删了正开着的会话，人可能正在项目页里） */
   function openSession(id, jumpQ, anchor, opts = {}) {
+    if (id && state.linkedClaude?.has(id)) id = state.linkedClaude.get(id);
     view.userOpen = id || null;   // 用户点开的（不是启动时按记着的会话号接回的）：打不开要说一声
     view.userNav = true;          // 启动窗口里用户自己开了会话：boot 的「接回上次会话」不再执行（FIND-003）
     if (id !== view.sessionId) saveLastRead();   // 切走前记下读到哪（在底部就作废）
@@ -237,7 +238,13 @@
     }
     if (!opts.keepPage) closePage();
     view.pendNav = null;      // 用户明确打开某一页：上一次在途的锚点 / 续读意图不再适用
+    if (typeof multiSessionView === "function") multiSessionView(id);
     resetView(id);
+    if (typeof multiRefresh === "function" && multiChatActive()) {
+      multiRefresh();
+      renderSessions();
+      return;
+    }
     if (!id) showWelcome();   // 新会话当场画首屏，不等重连回来——中间空着那一下就是闪
     showFailNote(id);         // 切走期间它在后台失败了：回到这个会话时把网关层的报错补在最新处（FIND-006）
     view.jumpQ = id && jumpQ ? jumpQ : "";   // 从搜索结果点进来：历史加载完后跳到命中的那条
@@ -581,6 +588,7 @@
   // 还没接上模型时，首屏不放输入框（什么都没配，打了也发不出去）：问候和两条路的卡片铺开（html.wel-setup）
   function setupMode(on) {
     const r = document.documentElement;
+    if (on && r.classList.contains("agent-chat")) return;
     if (r.classList.contains("wel-setup") === on) return;
     r.classList.toggle("wel-setup", on);
     if (!on && r.classList.contains("wel")) { autoGrow(); MO.play($("composer"), "mo-in-rise", 900); }
@@ -985,6 +993,7 @@
       if (typeof adoptLastSession === "function") adoptLastSession(ev.lastSessionId);
       if (typeof refreshStatus === "function") refreshStatus().catch(() => {});
     }
+    if (typeof multiChatActive === "function" && multiChatActive()) { multiSyncChoice(); return; }
     if (ev.resume) { calmStatus(t("已连接")); return; }
     beginReplay();
 
@@ -1299,6 +1308,7 @@
 
   /** 插话键只在「正在跑 + 输入框里有字」时露头 */
   function syncInterject() {
+    if (typeof multiChatActive === "function" && multiChatActive()) { multiSendButton(); return; }
     const has = hasDraft(), stop = isBusy() && !has;
     interjectEl.classList.toggle("hidden", !(isBusy() && has));
     sendEl.classList.toggle("busy", stop);

@@ -561,7 +561,8 @@
     await refreshStatus();
     // 本地不知道用哪条，就问网关「最近真正跑过哪条会话」—— 总比默默开个新会话强；
     // 用户在 /api/status 回来之前已经自己点了新对话 / 打开过会话，就不接（FIND-003，规则见 04 的 adoptLastSession）
-    adoptLastSession(state.serverStatus?.lastSessionId);
+    if (view.sessionId?.startsWith("multi:")) openSession(view.sessionId, null, null, {keepPage:true});
+    else adoptLastSession(state.serverStatus?.lastSessionId);
     connectBus(false);                   // hello 到了就会去取历史 / 接上正在跑的那一轮
 
     await Promise.all([loadSettings(), loadCaps(), loadSessions()]);

@@ -22,9 +22,9 @@ async function checkWorkbench() {
     by(id).dispatchEvent(new Event("change", { bubbles: true }));
   }
   function compose(text) {
-    by("ma-input").value = text;
-    by("ma-input").dispatchEvent(new Event("input"));
-    by("ma-send").click();
+    by("input").value = text;
+    by("input").dispatchEvent(new Event("input"));
+    by("btn-send").click();
   }
   const first = { id: "turn-1", agent: "claude", user: "Decide on A", assistant: "A selected", status: "done", tools: [{ label: "Test", text: "<script>fixture</script>" }] };
   const chat = { id: "project-chat", title: "Fixture", projectId: "p", activeAgent: "claude", turns: [first], activeRun: null };
@@ -35,7 +35,7 @@ async function checkWorkbench() {
     quota: { claude: [{ name: "5h", remaining: 4, resetsAt: Date.now() + 3600000 }], codex: [], agy: [] },
   };
   const original = window.fetch, calls = [], errors = [];
-  let checkingLogin = false;
+  let checkingLogin = false, imported = false, simulateDrop = "";
   window.addEventListener("error", event => errors.push(event.message));
   window.fetch = async (u, opts) => {
     const addr = new URL(u, location.href);
@@ -51,9 +51,14 @@ async function checkWorkbench() {
     calls.push({ action, body });
     let reply = { ok: true };
     if (action === "state") reply = { ...state, conversation: addr.searchParams.get("id") === chat.id ? chat : null };
+    if (action === "create") { if (body.claudeSessionId) imported = true; reply = { id: chat.id }; }
+    if (action === "conversations") reply = {conversations: imported ? [{ ...chat, origin: "synthetic-ui-a" }] : []};
+    if (action === "models") reply = { agent: addr.searchParams.get("agent"), models: [{ id: "fixture-destination", label: "Fixture" }] };
     if (action === "send") {
+      if (simulateDrop === "before") { simulateDrop = ""; throw new TypeError("fixture lost connection"); }
       chat.turns.push({ id: "turn-" + (chat.turns.length + 1), requestId: body.requestId, agent: body.agent, user: body.text, assistant: "", status: "running" });
       chat.activeRun = { stage: "handoff", agent: body.agent, text: "", approvals: [] };
+      if (simulateDrop === "after") { simulateDrop = ""; throw new TypeError("fixture dropped acknowledgement"); }
     }
     if (action === "stop") {
       chat.turns.at(-1).status = "interrupted"; chat.turns.at(-1).error = "fixture stopped";
@@ -63,25 +68,36 @@ async function checkWorkbench() {
   };
   const sent = () => calls.filter(x => x.action === "send").at(-1)?.body;
   await until(() => !!window.__cc, "app startup");
-  by("btn-menu").click();
-  await until(() => by("side-nav").querySelector("[data-page=multi]"), "multi-agent navigation");
-  by("side-nav").querySelector("[data-page=multi]").click();
-  await until(() => by("ma-conversations").options.length === 2, "conversation menu");
-  select("ma-conversations", chat.id);
+  await until(() => window.__cc.srv.connected, "native gateway connection");
+  window.__cc.openSession("synthetic-ui-a");
+  await until(() => window.__cc.view.histOk, "original Claude chat");
+  by("chat-agent-chip").click();
+  select("set-agent","codex");
+  await until(() => calls.some(x => x.action === "create" && x.body.claudeSessionId === "synthetic-ui-a"), "import native Claude chat");
+  by("set-x").click();
+  assert(!by("side-nav").querySelector("[data-page=multi]"), "agent switching belongs to main chat");
   await until(() => by("ma-turns").textContent.includes(first.assistant), "restored conversation");
   const toolRecord = by("ma-turns").querySelector("details[data-detail$='-tools']");
   assert(toolRecord && !toolRecord.open && toolRecord.textContent.includes("<script>fixture</script>") && !toolRecord.querySelector("script"), "collapsed, escaped tool evidence");
-  select("ma-agent", "codex");
+
   select("ma-mode", "manual");
   by("ma-checks").querySelector("input").click();
+  simulateDrop = "before";
+  Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
   compose("Review A");
-  await until(() => sent()?.agent === "codex" && !by("ma-stop").classList.contains("hidden"), "Codex turn");
+  await until(() => calls.some(x => x.action === "send") && !by("ma-error").classList.contains("hidden"), "failed request keeps the draft");
+  const firstRequest = sent().requestId;
+  assert(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(firstRequest), "WebView fallback UUID");
+  assert(by("input").value === "Review A", "original input after network failure");
+  by("btn-send").click();
+  await until(() => sent()?.agent === "codex" && by("btn-send").classList.contains("busy"), "Codex turn");
+  assert(sent().requestId === firstRequest, "same request ID after a dropped connection");
   assert(sent().selected.join() === first.id && sent().mode === "manual", "selected history");
-  by("ma-stop").click();
+  by("btn-send").click();
   await until(() => by("ma-turns").textContent.includes("fixture stopped"), "interrupted turn");
   by("ma-turns").querySelector("[data-retry-turn]").click();
   select("ma-mode", "third-party"); select("ma-provider", "third");
-  by("ma-send").click();
+  by("btn-send").click();
   await until(() => sent()?.mode === "third-party", "third-party retry");
   assert(sent().provider === "third" && sent().model === "model-1", "provider and model");
   chat.activeRun.approvals = [{ id: "approval-1", label: "Run tests?" }];
@@ -91,21 +107,37 @@ async function checkWorkbench() {
   await until(() => calls.some(x => x.action === "approve" && x.body.approvalId === "approval-1" && x.body.allow === false), "deny approval");
   chat.activeRun = null; chat.turns.at(-1).status = "done"; chat.activeAgent = "agy";
   by("ma-retry").click();
-  await until(() => by("ma-agent").value === "agy", "restore Google selection");
-  select("ma-agent", "claude");
+  await until(() => !by("btn-send").classList.contains("busy"), "Google handoff completed");
+  select("set-agent", "claude");
   assert(by("ma-mode").value === "manual", "manual handoff from Google");
   assert(!by("ma-warning").classList.contains("hidden"), "low quota");
   by("ma-dismiss").click(); by("ma-retry").click();
   await until(() => by("ma-warning").classList.contains("hidden"), "dismissed quota");
   state.claude.email = "another@example.invalid"; by("ma-retry").click();
   await until(() => !by("ma-warning").classList.contains("hidden"), "new account's quota");
+  simulateDrop = "after";
   compose("Start with no attachments");
   await until(() => sent()?.text === "Start with no attachments", "manual send with no selected history");
   assert(sent().selected.length === 0, "no automatic history attached");
+  await until(() => by("input").value === "", "server accepted request despite lost acknowledgement");
+  await until(() => window.__cc.state.linkedClaude?.has("synthetic-ui-a"), "native ID indexed with its shared chat");
+  window.__cc.openSession("synthetic-ui-b");
+  await until(() => window.__cc.view.sessionId === "synthetic-ui-b" && window.__cc.view.histOk, "other native chat");
+  window.__cc.openSession("synthetic-ui-a");
+  await until(() => window.__cc.view.sessionId === "multi:"+chat.id && by("ma-turns").textContent.includes(first.assistant), "native project link restores the shared conversation");
   checkingLogin = true;
-  by("ma-accounts-btn").click(); by("ma-claude-settings").click();
-  await until(() => by("set-provider").value === "anthropic" && by("login-actions")?.querySelector("[data-act=login]"), "official Claude login card");
-  assert(!by("prov-card").classList.contains("hidden"), "Claude login card expanded");
+  by("chat-agent-chip").click();
+  await until(() => !by("set-ov").classList.contains("hidden") && by("set-agent").value === "claude", "main agent settings");
+  select("set-agent", "agy");
+  await until(() => [...by("set-agent-model").options].some(o => o.value === "fixture-destination"), "official model list");
+  select("set-agent-model","fixture-destination");
+  by("set-x").click();
+  window.__cc.newConversation();
+  chat.activeRun = null; chat.activeAgent = null; chat.turns.length = 0;
+  compose("New Google project");
+  await until(() => sent()?.text === "New Google project", "send from fresh main conversation");
+  assert(sent().agent === "agy" && sent().destinationModel === "fixture-destination", "selected Google model reaches the destination");
+  assert(calls.some(x => x.action === "create" && !x.body.claudeSessionId && x.body.title === "New Google project"), "new chat created without importing another session");
   assert(!errors.length, errors.join("\n"));
 }
 
@@ -146,7 +178,7 @@ try {
   timer = setTimeout(() => finish("Timed out waiting for Chromium"), 45000);
   result = await complete;
   if (result) throw Error(result);
-  console.log("PASS multi-agent chat, handoff, approval, retry, empty selection and per-account quota warning");
+  console.log("PASS main composer, Claude import, Codex and Google models, handoffs, approvals, retry, lost acknowledgements, and quota warnings");
 } finally {
   clearTimeout(timer);
   if (browser?.pid && browser.exitCode === null) {

@@ -5,10 +5,10 @@ import { claudeBlocked, claudeCmd, claudeEnv, ensureBridge, killTree, settingsAr
 import { authStatus } from "./login.mjs";
 import { ensureLlama } from "./local.mjs";
 import { ensureManagedBridge } from "./managed-bridge.mjs";
-import { isLoginMode } from "./models.mjs";
+import { fetchModels, isLoginMode } from "./models.mjs";
 import { PROVIDER, keyOf, providerBrief, providerById } from "./providers.mjs";
 import { QUEUE, abortRun, endRun, sidForItem } from "./queue.mjs";
-import { startRun } from "./run.mjs";
+import { execIntent, startRun } from "./run.mjs";
 import { RUNS, maxParallel, runOfSession } from "./runs.mjs";
 import { RATE_LIMITS } from "./stream.mjs";
 
@@ -25,6 +25,12 @@ function subscription() {
 export function claudeProviders() {
   return providerBrief().filter(p => p.usable && !p.login && p.keyMode === "key")
     .map(({ id, label, defaultModel }) => ({ id, label, defaultModel }));
+}
+
+export async function claudeModels() {
+  const provider = subscription();
+  const list = await fetchModels(false, provider);
+  return { models: list.map(m => ({ id: m.id, label: m.name || m.id })), defaultModel: provider.defaultModel || "" };
 }
 
 export async function claudeState() {
@@ -44,8 +50,15 @@ export async function claudeState() {
 
 // Admit the turn synchronously in the existing gateway runner. Busy native sessions must
 // finish first, even if they were opened in the classic conversation view.
-export async function runClaude({ sessionId, cwd, text, signal, onEvent = () => {} }) {
-  subscription();
+export async function runClaude({ sessionId, cwd, text, model, signal, onEvent = () => {} }) {
+  const p = subscription();
+  // A resumed CLI session can retain its old model. Explicit "engine default"
+  // uses the official default alias (or this provider's configured default).
+  const selectedModel = sessionId && model === "" ? p.defaultModel || "default" : model;
+  const pin = !sessionId || model != null ? { provider: OFFICIAL, model: model || "" } : null;
+  if (selectedModel && execIntent({ sessionId, cwd, provider: OFFICIAL, pin, model: selectedModel }).model !== selectedModel) {
+    throw new Error("Claude Code 不支持所选模型：" + model);
+  }
   if (signal?.aborted) throw stopError();
   if (RUNS.size >= maxParallel()) throw new Error("Claude 并行回合已满，请在一轮结束后重试。");
   if (sessionId && (runOfSession(sessionId) || QUEUE.some(q => sidForItem(q) === sessionId))) {
@@ -94,7 +107,7 @@ export async function runClaude({ sessionId, cwd, text, signal, onEvent = () => 
       }
     });
     signal?.addEventListener("abort", stop, { once: true });
-    startRun({ id, message: text, sessionId, cwd, provider: OFFICIAL, pin: !sessionId ? { provider: OFFICIAL, model: "" } : null,
+    startRun({ id, message: text, sessionId, cwd, provider: OFFICIAL, model: selectedModel, pin,
       permissionMode: "default" }).catch(err => {
       const live = RUNS.get(id);
       if (live) { error = err.message; endRun(live, { failed: true }); }

@@ -37,13 +37,16 @@ test("outgoing native session selects context, target resumes its own thread on 
   const { db, id, calls, send } = setup(t);
   const req = await send("claude", "design");
   db.send(req);
-  await send("codex", "implement", {mode:"third-party",provider:"custom",model:"cheap"});
+  await send("codex", "implement", {mode:"third-party",provider:"custom",model:"cheap",destinationModel:"target-model"});
   await send("claude", "review");
   assert.deepEqual(calls.map(v=>[v.agent,v.op,v.sessionId]), [
     ["claude","run",undefined], ["claude","handoff","claude-native"], ["codex","run",undefined],
     ["codex","handoff","codex-native"], ["claude","run","claude-native"]
   ]);
   assert.equal(calls[1].provider, "custom");
+  assert.equal(calls[1].model, "cheap");
+  assert.equal(calls[2].model, "target-model");
+  assert.equal(db.view(id).turns[1].model, "target-model");
   assert.match(calls[2].text, /claude summary/);
   assert.match(calls[4].text, /codex summary/);
   assert.equal(db.view(id).turns.length,3);

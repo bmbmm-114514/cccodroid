@@ -17,7 +17,7 @@ fs.writeFileSync(providerFile, JSON.stringify({ active: "anthropic", providers: 
 } }));
 PATHS.claudeLoader = loader;
 PATHS.claude = process.execPath;
-const { runClaude, handoffClaude, claudeProviders } = await import("../gw/multi-claude.mjs");
+const { runClaude, handoffClaude, claudeProviders, claudeModels } = await import("../gw/multi-claude.mjs");
 const { SETTINGS } = await import("../gw/settings-store.mjs");
 const beforeTitle = SETTINGS.autoTitle;
 SETTINGS.autoTitle = false;
@@ -42,7 +42,7 @@ test("Claude work keeps the subscription route, exposes the native ID, and answe
     const emit = v => console.log(JSON.stringify(v));
     const args = process.argv;
     if (process.env.CCAPP_PROVIDER !== "anthropic" || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_BASE_URL) process.exit(3);
-    if (args[args.indexOf("--permission-mode") + 1] !== "default") process.exit(4);
+    if (args[args.indexOf("--permission-mode") + 1] !== "default" || args[args.indexOf("--model") + 1] !== "sonnet") process.exit(4);
     const reader = createInterface({input:process.stdin});
     reader.on("line", l => {
       const v = JSON.parse(l);
@@ -59,7 +59,9 @@ test("Claude work keeps the subscription route, exposes the native ID, and answe
     });
   `);
   const seen = [];
-  const result = await runClaude({ cwd: dir, text: "new work", onEvent(ev) {
+  assert.ok((await claudeModels()).models.some(m => m.id === "sonnet" && m.label));
+  await assert.rejects(runClaude({ cwd: dir, text: "wrong model", model: "not-a-claude-model" }), /不支持所选模型/);
+  const result = await runClaude({ cwd: dir, text: "new work", model: "sonnet", onEvent(ev) {
     seen.push(ev.type);
     if (ev.type === "approval") { assert.match(ev.label, /work.txt/); ev.respond(true); }
   } });

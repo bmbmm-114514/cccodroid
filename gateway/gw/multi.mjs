@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { holdMultiActivity } from "./runs.mjs";
-import { agyState, installAgy, loginAgy, respondAgy, runAgy, stopAgyLogin } from "./multi-agy.mjs";
+import { agyModels, agyState, installAgy, loginAgy, respondAgy, runAgy, stopAgyLogin } from "./multi-agy.mjs";
 import { agyQuota } from "./multi-agy-quota.mjs";
 import { shutdownAgentTransports } from "./multi-rpc.mjs";
 import { CFG } from "./config.mjs";
@@ -12,7 +12,7 @@ import { findSessionFile, peekSession } from "./sessions.mjs";
 import { readSessionForward } from "./transcript.mjs";
 import { providerById, keyOf } from "./providers.mjs";
 import { conversationStore, problem, recordTool } from "./multi-conversations.mjs";
-import { runClaude, handoffClaude, claudeProviders, claudeState } from "./multi-claude.mjs";
+import { runClaude, handoffClaude, claudeModels, claudeProviders, claudeState } from "./multi-claude.mjs";
 import { createCodexClient } from "./multi-codex.mjs";
 import { codexOptions } from "./multi-codex-launch.mjs";
 import { installation, startInstall } from "./multi-codex-install.mjs";
@@ -172,6 +172,20 @@ export async function routeMulti(req, res, u, p) {
   if (!p.startsWith("/api/multi/")) return NEXT;
   const action = p.slice("/api/multi/".length);
   try {
+    if (action === "models" && req.method === "GET") {
+      const agent = u.searchParams.get("agent");
+      let catalog;
+      if (agent === "claude") catalog = await claudeModels();
+      else if (agent === "codex") {
+        if (!installation().installed) throw problem("请先安装 Codex", 409);
+        catalog = await (await client()).models();
+      } else if (agent === "agy") {
+        if (!agyState().installed) throw problem("请先安装 Antigravity", 409);
+        catalog = await agyModels();
+      } else throw problem("请选择有效的 Agent");
+      return sendJson(res, 200, { agent, ...catalog });
+    }
+    if (action === "conversations" && req.method === "GET") return sendJson(res, 200, { conversations: store().list() });
     if (action === "state" && req.method === "GET") {
       const db = store();
       const id = u.searchParams.get("id");
@@ -190,6 +204,7 @@ export async function routeMulti(req, res, u, p) {
     catch (e) { throw problem("请求正文无效", e.status || 400); }
     if (!b || typeof b !== "object" || Array.isArray(b)) throw problem("请求正文无效");
     switch (action) {
+      case "edit": store().edit(b.id, b); break;
       case "create": return sendJson(res, 201, { id: await createConversation(b) });
       case "send": store().send(b); break;
       case "stop": store().stop(b.id); break;

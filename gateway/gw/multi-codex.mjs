@@ -40,7 +40,7 @@ function thirdPartyConfig(provider) {
 }
 
 export function createCodexClient(options = {}) {
-  let transport, ready;
+  let transport, ready, defaultModelId;
   const runs = new Map();
   const reserved = new Set();
   const approvals = new Map();
@@ -55,6 +55,7 @@ export function createCodexClient(options = {}) {
     if (rpc !== transport) return;
     transport = null;
     ready = null;
+    defaultModelId = undefined;
     approvals.clear();
     for (const run of runs.values()) run.done.reject(err);
     if (rpc.initialized && !rpc.intentionalClose) emit(null, { type: "disconnect", error: err.message });
@@ -85,6 +86,27 @@ export function createCodexClient(options = {}) {
   const account = () => call("account/read", { refreshToken: false });
   const login = () => call("account/login/start", { type: "chatgptDeviceCode" });
   const limits = () => call("account/rateLimits/read", {});
+
+  async function models() {
+    const rpc = await connect();
+    const result = new Map(), cursors = new Set();
+    let cursor, defaultModel = "";
+    do {
+      const page = await rpc.request("model/list", { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) });
+      if (!Array.isArray(page?.data)) throw new Error("Codex 返回的模型清单无效");
+      for (const row of page.data) {
+        const id = row?.model || row?.id;
+        if (typeof id !== "string" || !id || row.hidden) continue;
+        result.set(id, { id, label: row.displayName || id });
+        if (row.isDefault) defaultModel = id;
+      }
+      cursor = page.nextCursor;
+      if (cursor && cursors.has(cursor)) throw new Error("Codex 模型清单分页重复");
+      if (cursor) cursors.add(cursor);
+    } while (cursor);
+    if (rpc === transport) defaultModelId = defaultModel;
+    return { models: [...result.values()], defaultModel };
+  }
 
   function respond(id, allow) {
     const row = approvals.get(id);
@@ -142,6 +164,7 @@ export function createCodexClient(options = {}) {
     const p = msg.params || {};
     if (msg.method === "account/rateLimits/updated") return emit(null, { type: "quota", ...p });
     if (msg.method === "account/updated" || msg.method === "account/login/completed") {
+      defaultModelId = undefined;
       if (msg.method === "account/login/completed") emit(null, { type: "login", success: p.success, error: p.error ? publicAgentError(p.error, "Codex 登录失败") : null });
       rpc.request("account/read", { refreshToken: false }).then((r) => {
         if (rpc === transport) emit(null, { type: "account", account: r.account });
@@ -189,6 +212,8 @@ export function createCodexClient(options = {}) {
         if (state?.account?.type !== "chatgpt") throw new Error("请先用 ChatGPT 账号登录 Codex");
       }
       if (signal?.aborted) throw stopped();
+      if (!forkConfig && threadId && model === "") model = defaultModelId ?? (await models()).defaultModel;
+      if (signal?.aborted) throw stopped();
       const params = threadArgs(cwd, model, !!forkConfig);
       if (threadId) params.threadId = threadId;
       if (forkConfig) {
@@ -203,6 +228,9 @@ export function createCodexClient(options = {}) {
       }
       const method = forkConfig ? "thread/fork" : threadId ? "thread/resume" : "thread/start";
       const reply = await rpc.request(method, params);
+      if (!forkConfig && model && reply?.model && reply.model !== model) {
+        throw new Error("Codex 未采用所选模型：" + model);
+      }
       const id = reply?.thread?.id;
       if (!id || (method === "thread/fork" && id === threadId)) throw new Error("Codex 没有返回有效的会话");
       if (forkConfig?.provider && reply.modelProvider !== HANDOFF_PROVIDER) throw new Error("Codex 未采用指定的第三方接口");
@@ -214,7 +242,7 @@ export function createCodexClient(options = {}) {
       if (signal?.aborted) throw stopped();
       signal?.addEventListener("abort", interrupt, { once: true });
       const started = await rpc.request("turn/start", {
-        threadId: id, input: [{ type: "text", text, text_elements: [] }],
+        threadId: id, ...(model ? { model } : {}), input: [{ type: "text", text, text_elements: [] }],
         ...(forkConfig ? { environments: [] } : {}),
       });
       run.turnId = started?.turn?.id;
@@ -266,7 +294,7 @@ export function createCodexClient(options = {}) {
   }
 
   return {
-    account, login, limits, respond, handoff, run: (p) => execute(p),
+    account, login, limits, models, respond, handoff, run: (p) => execute(p),
     fork: (p, provider) => execute(p, { provider }),
     close() {
       if (transport) { transport.intentionalClose = true; transport.close(); }

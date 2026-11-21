@@ -532,7 +532,9 @@
 
   // 设置页的模型 / 思考强度是全局默认：新会话、没在输入栏面板里单独选过的会话都用它
   $("set-model").addEventListener("change", async (e) => {
-    if (!(await saveSettings({ model: e.target.value }))) return;
+    const model = e.target.value;
+    if (!(await saveSettings({ model }))) return;
+    if (currentAgentChoice().agent === "claude" && state.providerActive === "anthropic") setAgentChoice("claude", model);
     await loadModels();                                  // 换模型后 effort 档位可能不同
   });
   $("set-perm").addEventListener("change", (e) => changePermMode(e.target.value));
@@ -818,3 +820,207 @@
     } catch (e) { $("caps-mcp").innerHTML = '<div class="row"><span class="tiny">' + esc(t("查询失败：{msg}", { msg: e.message })) + "</span></div>"; }
   });
 
+
+  // 主聊天和设置读取同一份选择。每个订阅单独记住型号，空字符串表示让引擎决定。
+  const agentChoiceKey = "cc.chat.agentChoice";
+  const agentAccountNames = { claude: "Claude", codex: "ChatGPT", agy: "Google" };
+  function readAgentChoice() {
+    try {
+      const p = JSON.parse(localStorage.getItem(agentChoiceKey));
+      if (p && Object.hasOwn(agentAccountNames, p.agent) && p.models && typeof p.models === "object") return p;
+    } catch {}
+    return { agent: "claude", models: {} };
+  }
+  let agentChoicePrefs = readAgentChoice();
+  function currentAgentChoice() {
+    const agent = agentChoicePrefs.agent;
+    const official = (state.providerActive || state.settings?.provider) === "anthropic";
+    const previous = agent === "claude" && official ? state.settings?.model : "";
+    const model = agentChoicePrefs.models[agent] ?? previous;
+    return { agent, model: typeof model === "string" ? model : "" };
+  }
+  function setAgentChoice(agent, model) {
+    if (!Object.hasOwn(agentAccountNames, agent)) return;
+    if (model !== undefined && (typeof model !== "string" || model.length > 200 || /[\x00-\x1f\x7f]/.test(model))) return;
+    const before = currentAgentChoice();
+    const firstModel = model !== undefined && !Object.hasOwn(agentChoicePrefs.models, agent);
+    agentChoicePrefs.agent = agent;
+    if (model !== undefined) agentChoicePrefs.models[agent] = model.trim();
+    try { localStorage.setItem(agentChoiceKey, JSON.stringify(agentChoicePrefs)); } catch {}
+    const after = currentAgentChoice();
+    if (firstModel || before.agent !== after.agent || before.model !== after.model) window.dispatchEvent(new Event("agent-choice-changed"));
+  }
+  window.addEventListener("storage", e => {
+    if (e.key === agentChoiceKey || e.key === null) {
+      agentChoicePrefs = readAgentChoice();
+      window.dispatchEvent(new Event("agent-choice-changed"));
+    }
+  });
+
+  let settingsAgent = "", agentSettingsSeq = 0, agentAccountRead = 0, agentAccountTimer = 0, agentVerifyUrl = "";
+  let agentModelList = null, agentModelError = "", agentModelDraft = false;
+  const agentSigningIn = new Set(), agentLoginBusy = new Set();
+  const agentLoginErrors = new Map();
+  const customAgentModel = "__custom_agent_model__";
+  function paintAgentModel() {
+    const { model } = currentAgentChoice();
+    const sel = $("set-agent-model"), list = agentModelList?.models || [];
+    const options = [new Option(agentModelList?.defaultModel ? t("（默认：{model}）", { model: agentModelList.defaultModel }) : t("引擎默认"), "")];
+    for (const item of list) if (item.id) options.push(new Option(item.label || item.id, item.id));
+    if (model && !list.some(item => item.id === model)) options.push(new Option(model, model));
+    options.push(new Option(t("自定义模型…"), customAgentModel));
+    sel.replaceChildren(...options);
+    sel.value = agentModelDraft ? customAgentModel : model;
+    $("set-agent-custom").classList.toggle("hidden", !agentModelDraft);
+    $("set-agent-model-note").textContent = agentModelError || (!agentModelList ? t("正在读取…") : "");
+  }
+  async function refreshAgentModels(agent, seq) {
+    try {
+      const r = await api("/api/multi/models?agent=" + encodeURIComponent(agent));
+      if (seq !== agentSettingsSeq || !setVisible("provider")) return;
+      if (r.agent !== agent || !Array.isArray(r.models)) throw new Error(t("读取模型清单失败"));
+      agentModelList = r;
+      agentModelError = "";
+    } catch (e) {
+      if (seq !== agentSettingsSeq || !setVisible("provider")) return;
+      agentModelError = e.message;
+    }
+    paintAgentModel();
+  }
+  function paintAgentLogin(agent, a) {
+    const signed = agent === "codex" ? a.account?.type === "chatgpt" : a.loggedIn;
+    const preparing = agent !== "claude" && !a.installed;
+    const login = agentSigningIn.has(agent) && a.login;
+    const error = agentLoginErrors.get(agent) || a.error || "";
+    $("set-agent-status").textContent = preparing ? t("正在准备内置引擎…")
+      : (a.email || a.account?.email || (signed == null ? t("未知") : signed ? t("已登录") : t("未登录")));
+    const btn = $("set-agent-login");
+    btn.textContent = signed ? (agent === "claude" ? t("管理账户") : t("换个账户登录")) : t("登录 {name}", { name: agentAccountNames[agent] });
+    btn.disabled = agentLoginBusy.has(agent) || preparing || !!login;
+    $("set-agent-auth").classList.toggle("hidden", !login);
+    $("set-agent-auth-note").textContent = login?.message || (login ? t("请在授权页面完成登录。") : "");
+    $("set-agent-device-code").textContent = login?.userCode || "";
+    $("set-agent-copy").classList.toggle("hidden", !login?.userCode);
+    agentVerifyUrl = login?.verificationUri || "";
+    $("set-agent-verify").classList.toggle("hidden", !agentVerifyUrl);
+    $("set-agent-auth-code").classList.toggle("hidden", !login?.needsCode);
+    $("set-agent-code").disabled = agentLoginBusy.has(agent);
+    $("set-agent-error").textContent = error;
+    $("set-agent-error").classList.toggle("hidden", !error);
+    return !!login || preparing;
+  }
+  async function refreshAgentAccount(agent, seq) {
+    const read = ++agentAccountRead;
+    clearTimeout(agentAccountTimer);
+    const live = () => seq === agentSettingsSeq && read === agentAccountRead && setVisible("provider");
+    if (!live()) return;
+    let delay = 15000;
+    try {
+      const data = await api("/api/multi/state");
+      if (!live()) return;
+      const a = data[agent] || {};
+      if (paintAgentLogin(agent, a)) delay = 1800;
+      if (agentSigningIn.has(agent) && !agentLoginBusy.has(agent) && !a.login) {
+        agentSigningIn.delete(agent);
+        refreshAgentModels(agent, seq);
+      }
+    } catch (e) {
+      if (!live()) return;
+      $("set-agent-status").textContent = e.message;
+      $("set-agent-login").disabled = agentLoginBusy.has(agent);
+    }
+    if (live()) agentAccountTimer = setTimeout(() => refreshAgentAccount(agent, seq), delay);
+  }
+  function openAgentSettings() {
+    const { agent } = currentAgentChoice(), seq = ++agentSettingsSeq;
+    settingsAgent = agent;
+    $("set-agent").value = agent;
+    $("set-agent-account").textContent = t("{name} 账户", { name: agentAccountNames[agent] });
+    $("set-agent-status").textContent = t("查询中…");
+    $("set-agent-login").textContent = t("登录 {name}", { name: agentAccountNames[agent] });
+    $("set-agent-login").disabled = agent !== "claude";
+    $("set-agent-auth").classList.add("hidden");
+    $("set-agent-error").classList.add("hidden");
+    $("set-agent-code").value = "";
+    agentVerifyUrl = "";
+    $("set-claude-interfaces").classList.toggle("hidden", agent !== "claude");
+    agentModelDraft = false; agentModelList = null; agentModelError = "";
+    paintAgentModel();
+    refreshAgentModels(agent, seq);
+    refreshAgentAccount(agent, seq);
+  }
+  window.addEventListener("agent-choice-changed", () => {
+    if (!setVisible("provider")) return;
+    if (settingsAgent !== currentAgentChoice().agent) openAgentSettings();
+    else paintAgentModel();
+  });
+  $("set-agent").addEventListener("change", e => setAgentChoice(e.target.value));
+  async function saveAgentModel(model) {
+    const { agent } = currentAgentChoice(), seq = agentSettingsSeq;
+    const sid = view.sessionId, gen = view.gen;
+    if (agent === "claude") {
+      let provider;
+      try { provider = (await sameGet("/api/providers")).active; }
+      catch (e) { toast(e.message, true); if (seq === agentSettingsSeq) paintAgentModel(); return; }
+      if (provider === "anthropic") {
+        if (!(await saveSettings({ model }))) { if (seq === agentSettingsSeq) paintAgentModel(); return; }
+        loadModels();
+      }
+      if (!sid?.startsWith("multi:") && view.sessionId === sid && view.gen === gen && (curProv() || provider) === "anthropic") {
+        try { await pickSessModel({ provider: "anthropic", model }); }
+        catch (e) { if (!e.stale) { toast(e.message, true); paintAgentModel(); return; } }
+      }
+    }
+    if (currentAgentChoice().agent !== agent) {
+      agentChoicePrefs.models[agent] = model;
+      try { localStorage.setItem(agentChoiceKey, JSON.stringify(agentChoicePrefs)); } catch {}
+      return;
+    }
+    agentModelDraft = false;
+    setAgentChoice(agent, model);
+    paintAgentModel();
+  }
+  $("set-agent-model").addEventListener("change", e => {
+    if (e.target.value !== customAgentModel) return saveAgentModel(e.target.value);
+    agentModelDraft = true; paintAgentModel();
+    $("set-agent-model-id").value = currentAgentChoice().model;
+    $("set-agent-model-id").focus();
+  });
+  $("set-agent-custom").addEventListener("submit", e => {
+    e.preventDefault();
+    const id = $("set-agent-model-id").value.trim();
+    if (id) saveAgentModel(id);
+  });
+  async function submitAgentLogin(code) {
+    const { agent } = currentAgentChoice(), seq = agentSettingsSeq;
+    if (agent === "claude") {
+      $("set-claude-interfaces").open = true;
+      state.provView = "anthropic"; provOpen = true;
+      await loadProviders();
+      if (seq === agentSettingsSeq && setVisible("provider")) $("prov-card").scrollIntoView({ block: "center" });
+      return;
+    }
+    if (agentLoginBusy.has(agent)) return;
+    agentLoginBusy.add(agent); agentSigningIn.add(agent); agentLoginErrors.delete(agent);
+    $("set-agent-login").disabled = true;
+    $("set-agent-code").disabled = true;
+    try {
+      await post("/api/multi/" + (agent === "agy" ? "agy-login" : "login"), code ? { code } : {});
+      if (seq === agentSettingsSeq && code) $("set-agent-code").value = "";
+    } catch (e) {
+      agentLoginErrors.set(agent, e.message);
+    } finally {
+      agentLoginBusy.delete(agent);
+      if (seq === agentSettingsSeq) refreshAgentAccount(agent, seq);
+    }
+  }
+  $("set-agent-login").addEventListener("click", () => submitAgentLogin());
+  $("set-agent-copy").addEventListener("click", () => copyText($("set-agent-device-code").textContent));
+  $("set-agent-verify").addEventListener("click", () => openExternal(agentVerifyUrl));
+  $("set-agent-auth-code").addEventListener("submit", e => {
+    e.preventDefault();
+    const code = $("set-agent-code").value.trim();
+    if (code) submitAgentLogin(code);
+  });
+  // 等后续聊天分段装好监听器，再把本次 WebView 恢复的选择交给它。
+  queueMicrotask(() => window.dispatchEvent(new Event("agent-choice-changed")));

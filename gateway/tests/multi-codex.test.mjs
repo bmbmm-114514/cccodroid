@@ -185,3 +185,39 @@ test("API key accounts cannot start subscription turns; invalid third-party conf
   assert.equal(processes.length, 1);
   assert.equal(calls.some(m => m.method === "turn/start"), false);
 });
+
+test("native model catalog follows cursors, excludes hidden rows and selected model reaches resume and turn", async (t) => {
+  const { client, calls } = fixture((child, msg) => {
+    if (msg.method === "model/list") {
+      const data = msg.params.cursor ? [{ id: "ui-b", model: "model-b", displayName: "Second" }]
+        : [{ id: "ui-a", model: "model-a", displayName: "First", isDefault: true }, { id: "hidden", hidden: true }];
+      child.reply(msg.id, { data, nextCursor: msg.params.cursor ? null : "next" });
+      return true;
+    }
+    if (msg.method === "turn/start") {
+      child.reply(msg.id, { turn: { id: "turn" } });
+      complete(child, msg.params.threadId);
+      return true;
+    }
+  });
+  t.after(() => client.close());
+  assert.deepEqual(await client.models(), {
+    models: [{ id: "model-a", label: "First" }, { id: "model-b", label: "Second" }], defaultModel: "model-a",
+  });
+  for (const [model, expected] of [["model-b", "model-b"], ["", "model-a"]]) {
+    await client.run({ ...params, threadId: "source", model });
+    for (const method of ["thread/resume","turn/start"]) assert.equal(calls.filter(m => m.method === method).at(-1).params.model, expected);
+  }
+});
+
+test("an explicit Codex model cannot silently run a different model", async (t) => {
+  const { client, calls } = fixture((child, msg) => {
+    if (msg.method === "thread/start") {
+      child.reply(msg.id, { thread: { id: "native" }, model: "different", modelProvider: "openai" });
+      return true;
+    }
+  });
+  t.after(() => client.close());
+  await assert.rejects(client.run({ ...params, model: "chosen" }), /未采用所选模型/);
+  assert.equal(calls.some(m => m.method === "turn/start"),false);
+});
