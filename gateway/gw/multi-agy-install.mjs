@@ -8,13 +8,9 @@ import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { CFG } from "./config.mjs";
 
-export const agyVersion = "1.5.13";
-const base = "https://storage.googleapis.com/antigravity-public/antigravity-cli/";
-const url = base + "1.5.13-5999302598852608/android-arm/cli_android_arm64.tar.gz";
-const size = 62696677;
-const sha512 = "10839b668703ba657fe938e2ebce25e2f39ecba566fbedb87907f6b74dab14e569f50af53ff66b4eaa0b7a708aac330d97ffd95ca4910fcd840d3504bd16d02a";
-const executableSha = "9eb98c2b808b6e5d0fc5c3e184de66394c2a6c21dd88bfe0bcb9e0762003f1c5";
-const binaryBytes = 200758288;
+import { agyRelease } from "./engine-releases.mjs";
+export const agyVersion = agyRelease.version;
+const { archive: url, archiveBytes: size, archiveSha512: sha512, sha256: executableSha, bytes: binaryBytes } = agyRelease;
 const dir = path.join(CFG.home, ".local", "share", "multi-agent");
 const binary = path.join(dir, "agy-" + agyVersion);
 let verification = "", installing = null, error = "";

@@ -247,11 +247,7 @@ public class MainActivity extends Activity {
                     try { ins.repairFirstRun(); Ledger.add(env, "repair", true, Tr.t("补跑了首次安装时没跑成的首次配置"), null); }
                     catch (Exception e) { Ledger.add(env, "repair", false, Tr.t("补跑首次配置失败：") + e.getMessage(), null); }
                 }
-                if (!env.claudeReady() && !env.claudeOff()) {      // 用户自己卸的不装回，等他在设置里选版本
-                    Updater u0 = Updater.get(this);
-                    ins.installClaude(new File(env.app, "scripts/install-claude.sh"), u0.pinned() ? u0.pinVer() : "latest".equals(u0.channel()) ? "latest" : "stable");
-                    say(Tr.t("✓ Claude Code 就绪"));
-                }
+                BundledEngines.prepare(env, ins);
                 // 上次自动下好的工具包更新：趁现在（刚打开、没有任务）装上
                 Updater upd = Updater.get(this);
                 if (upd.auto() && upd.devkitStaged()) {
@@ -907,39 +903,15 @@ public class MainActivity extends Activity {
     }
 
     // ── 工具包从哪装：GitHub / cccodroid.net 镜像 / 本地文件 ──────────────────
-    /** 首装：让用户选来源，照着走。两个下载源互为备用（首选连着失败就换另一个接着续传）；本地文件没选就回到选择 */
+    /** Use the base runtime from this APK. Additional development modules remain available in settings. */
     private void installFirstDevkit(Installer ins) throws Exception {
         org.json.JSONObject pin = Updater.devkitPin(this);
-        if (pin == null || pin.optJSONObject("gz") == null) throw new java.io.IOException(Tr.t("APK 里的工具包清单坏了"));
-        String file = pin.getJSONObject("gz").getString("file"), base = pin.getString("base");
-        String gh = base + file, mirror = Updater.devkitMirror(base, file);
-        // 以前共享目录里有 devkit-cc.codroid.tar.gz 就自动多一项「用共享目录里的文件」：那里任何有存储权限的应用都能放，
-        // 等于替人摆好一个诱饵（审查 v0513b 低-24）。离线装照样能走「选择本地文件…」，自己挑的文件才装
-        String local = null;
-        while (true) {
-            String c = chooseDevkitSource(pin, local);
-            if ("github".equals(c) || "mirror".equals(c)) {
-                boolean m = "mirror".equals(c);
-                // 模块化工具包（钉子里有 modules.json）：取清单、按钉子核 sha256，让用户勾模块，再按块装
-                org.json.JSONObject pm = pin.optJSONObject("modules");
-                if (pm != null) {
-                    String mf = pm.optString("file", "modules.json"), mgh = base + mf, mmir = Updater.devkitMirror(base, mf);
-                    File mj = ins.download(m ? mmir : mgh, m ? mgh : mmir, new File(env.files, mf), pm.optLong("bytes"), pm.optString("sha256"));
-                    byte[] bytes = java.nio.file.Files.readAllBytes(mj.toPath());
-                    java.util.List<String> want = chooseModules(new org.json.JSONObject(new String(bytes, java.nio.charset.StandardCharsets.UTF_8)));
-                    ins.installModules(bytes, want, base, pin.getJSONObject("gz").getString("sha256"), m);
-                    mj.delete();
-                    return;
-                }
-                File gz = ins.downloadDevkit(pin, m ? mirror : gh, m ? gh : mirror);
-                ins.installDevkit(gz.getPath());
-                gz.delete();      // 解完就删，腾出 650 MB
-                return;
-            }
-            Uri uri = "path".equals(c) ? Uri.fromFile(new File(local)) : pickDevkitBlocking();
-            if (uri == null) { say(Tr.t("没选文件")); continue; }
-            if (installLocal(ins, uri, false)) return;
-        }
+        String modules = AppFiles.assetText(this, "engines/modules.json");
+        if (pin == null || modules == null) throw new java.io.IOException("APK 缺少基础工具包");
+        byte[] bytes = modules.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String hash = Installer.hex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        if (!hash.equals(pin.getJSONObject("modules").getString("sha256"))) throw new java.io.IOException("APK 工具包清单校验失败");
+        ins.installBundledBase(bytes, pin.getString("base"), pin.getJSONObject("gz").getString("sha256"));
     }
 
     /** 在安装页上摆出来源选择，等用户点一个。返回 github / mirror / local / path */

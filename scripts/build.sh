@@ -79,6 +79,7 @@ DK_BASE=$(head -1 "$A/assets/devkit-sources.txt")
 if [ -n "$DEVKIT_BASES" ]; then node "$ROOT/scripts/pin-devkit.mjs" "$DK_BASE" "$A/assets/devkit-pin.json" || exit 1
 else cp "$ROOT/devkit-pin.json" "$A/assets/devkit-pin.json"; fi
 node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(p.base!==process.argv[2]){console.error("✗ devkit-pin.json 是 "+p.base+"，devkit-sources.txt 是 "+process.argv[2]+"：跑 node scripts/pin-devkit.mjs 重新生成");process.exit(1)}' "$A/assets/devkit-pin.json" "$DK_BASE" || exit 1
+node "$ROOT/scripts/bundle-engines.mjs" "$ROOT/devkit/cache" "$A/assets/engines" "$A/assets/devkit-pin.json"
 # 原生小库与小程序一律进 APK 的原生库目录（lib/arm64-v8a，名字得是 lib*.so）：安装时系统解到 /data/app/…/lib/arm64，
 # 应用自己的 uid 也改不了，起网关、起 claude 时直接从那里加载，没有「核过之后被换」的窗口（安全 4 第 1 层）。路径由 Env.java 经环境变量交出去
 NL="$A/nativelib"; rm -rf "$NL"; mkdir -p "$NL" "$A/assets/app/lib"     # build/ 下面会被 javac 那步整个清掉，先放这里、打包前拷过去
@@ -174,7 +175,7 @@ if [ -n "$TARGET_SDK" ]; then
   echo "  targetSdk $TARGET_SDK"
 fi
 $AAPT2 link -o "$A/build/unsigned.apk" -I "$AJAR" \
-  --manifest "$MANIFEST" -A "$A/assets" "$A/build/res.zip"
+  --manifest "$MANIFEST" -0 gz -A "$A/assets" "$A/build/res.zip"
 # FILES 里的每个文件都得真进了包（aapt2 会丢点开头的、_ 开头目录这类）：少一个，装好后 AppFiles 每次启动都判「被改过」、整个重铺
 node -e 'const fs=require("fs"),b=fs.readFileSync(process.argv[1]);let e=b.length-22;while(e>=0&&b.readUInt32LE(e)!==0x06054b50)e--;
   const n=b.readUInt16LE(e+10),names=new Set();for(let i=0,p=b.readUInt32LE(e+16);i<n;i++){const l=b.readUInt16LE(p+28);names.add(b.toString("utf8",p+46,p+46+l));p+=46+l+b.readUInt16LE(p+30)+b.readUInt16LE(p+32)}

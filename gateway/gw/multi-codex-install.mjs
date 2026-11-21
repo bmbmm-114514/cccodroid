@@ -6,13 +6,10 @@ import { createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { CFG } from "./config.mjs";
 
-const asset = "codex-app-server-aarch64-unknown-linux-musl";
-const url = "https://github.com/openai/codex/releases/download/rust-v0.166.0/" + asset + ".tar.gz";
-const archiveSize = 88007340;
-const archiveHash = "3bc8dce2c2d8df023574736e7439ff834c3825d584dc79aa9b1f642023555bb1";
-const executableHash = "f21b0b95117d4f32151abe78d8030cc1175e877fe741deaaea46451f2b51ade2";
+import { codexRelease, codexArchive as url } from "./engine-releases.mjs";
+const { asset, archiveBytes: archiveSize, archiveSha256: archiveHash, sha256: executableHash } = codexRelease;
 const dir = path.join(CFG.home, ".local", "share", "multi-agent");
-export const codexBinary = path.join(dir, "codex-app-server-0.166.0");
+export const codexBinary = path.join(dir, "codex-app-server-" + codexRelease.version);
 
 let task = null, error = "", checked = "";
 export function installation() {

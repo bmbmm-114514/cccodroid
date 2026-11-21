@@ -26,6 +26,7 @@ final class Installer {
 
     Installer(Env env, Progress ui) { this.env = env; this.ui = ui; }
     void step(String m) { ui.step(m); }
+    void bundleProgress(long done, long total) { ui.bytes(done, total); }
 
     // ── devkit 下载 ────────────────────────────────────────────────────
     /** 工具包镜像（VPS 直连，不过 Cloudflare 代理）：dl.cccodroid.net/devkit/<tag>/ 与 GitHub Release 里的文件逐字节相同 */
@@ -624,6 +625,14 @@ final class Installer {
      * @param mirrorFirst 先走 dl.cccodroid.net 镜像
      */
     void installModules(byte[] mjBytes, java.util.Collection<String> want, String base, String identity, boolean mirrorFirst) throws IOException {
+        installModules(mjBytes, want, base, identity, mirrorFirst, false);
+    }
+
+    void installBundledBase(byte[] mjBytes, String base, String identity) throws IOException {
+        installModules(mjBytes, java.util.Collections.emptyList(), base, identity, false, true);
+    }
+
+    private void installModules(byte[] mjBytes, java.util.Collection<String> want, String base, String identity, boolean mirrorFirst, boolean bundled) throws IOException {
         JSONObject mj;
         try { mj = new JSONObject(new String(mjBytes, StandardCharsets.UTF_8)); } catch (org.json.JSONException e) { throw new IOException(Tr.t("模块清单坏了"), e); }
         java.util.List<JSONObject> order = moduleOrder(mj, want);
@@ -632,7 +641,7 @@ final class Installer {
             JSONObject gz = m.optJSONObject("gz"), tar = m.optJSONObject("tar");
             if (gz == null || tar == null) throw new IOException(Tr.t("模块清单坏了"));
             File have = new File(env.files, gz.optString("file"));
-            if (!have.isFile()) dl += gz.optLong("bytes") - new File(have.getPath() + ".part").length();
+            if (!bundled && !have.isFile()) dl += gz.optLong("bytes") - new File(have.getPath() + ".part").length();
             unpacked += tar.optLong("bytes");
         }
         // 峰值：还要下的 + 已下的压缩包（解完一块删一块，按全部算）+ 解开后的全部 + 余量
@@ -642,6 +651,10 @@ final class Installer {
         String tag = base.replaceAll("/+$", ""); tag = tag.substring(tag.lastIndexOf('/') + 1);
         java.util.List<File> gzs = new java.util.ArrayList<>();
         for (JSONObject m : order) {
+            if (bundled) {
+                if (!"base".equals(m.optString("id"))) throw new IOException("APK 缺少必需的工具包模块");
+                continue;
+            }
             JSONObject gz = m.optJSONObject("gz");
             String file = gz.optString("file"), gh = base + file, mirror = DEVKIT_MIRROR + tag + "/" + file;
             ui.step(Tr.f("下载模块「{0}」{1} MB…", moduleName(m), String.valueOf(gz.optLong("bytes") >> 20)));
@@ -654,8 +667,9 @@ final class Installer {
         for (int i = 0; i < order.size(); i++) {
             JSONObject m = order.get(i);
             ui.step(Tr.f("解包「{0}」…", moduleName(m)));
-            File gz = gzs.get(i);
-            extractInto(tmp, new FileInputStream(gz), gz.length(), true, m.optJSONObject("tar").optString("sha256"));
+            InputStream source = bundled ? env.context.getAssets().open("engines/base.tar.gz", android.content.res.AssetManager.ACCESS_STREAMING)
+                    : new FileInputStream(gzs.get(i));
+            extractInto(tmp, source, m.optJSONObject("gz").optLong("bytes"), true, m.optJSONObject("tar").optString("sha256"));
             ids.put(m.optString("id"));
         }
         relocateStaged(tmp);
