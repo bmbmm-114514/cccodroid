@@ -41,6 +41,7 @@ test("Claude work keeps the subscription route, exposes the native ID, and answe
     const {createInterface} = require("node:readline");
     const emit = v => console.log(JSON.stringify(v));
     const args = process.argv;
+    if (process.env.DISABLE_AUTOUPDATER !== "1") process.exit(2);
     if (process.env.CCAPP_PROVIDER !== "anthropic" || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_BASE_URL) process.exit(3);
     if (args[args.indexOf("--permission-mode") + 1] !== "default" || args[args.indexOf("--model") + 1] !== "sonnet") process.exit(4);
     const reader = createInterface({input:process.stdin});

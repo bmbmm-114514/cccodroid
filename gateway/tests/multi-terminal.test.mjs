@@ -43,6 +43,19 @@ test("terminal passes argv and current directory through and preserves the nativ
   })), 143);
 });
 
+test("the packaged Claude terminal keeps the App-selected version", async t => {
+  const { dir, project, bin, env } = await fixture(t);
+  const wrapper = path.join(bin, "claude");
+  await fs.promises.copyFile(path.join(root, "android/assets/bin/claude"), wrapper);
+  await fs.promises.symlink(path.join(root, "gateway/guard"), path.join(bin, "../guard"));
+  const loader = path.join(dir, "version-probe");
+  await fs.promises.writeFile(loader, '#!/bin/sh\nprintf "%s" "$DISABLE_AUTOUPDATER"\n', { mode: 0o700 });
+  const probe = await exec("/bin/sh", [wrapper, "--version"], {
+    cwd: project, env: { ...env, CCAPP_LD: loader, DISABLE_AUTOUPDATER: "0" }
+  });
+  assert.equal(probe.stdout, "1");
+});
+
 test("both packaged shell entries report a missing engine without reading gateway state", async t => {
   const { dir, bin, project, env } = await fixture(t);
   for (const [name, label] of [["codex", "Codex CLI"], ["agy", "Antigravity CLI"]]) {
@@ -62,6 +75,7 @@ test("terminal and app use the same personal profiles with separate CLI and app-
   assert.equal(term.env.CCAPP_KEY_FILE, undefined);
   assert.equal(personalEnv().HOME, CFG.home);
   assert.equal(personalEnv().GOOGLE_API_KEY, undefined);
+  assert.equal(personalEnv({ AGY_CLI_DISABLE_AUTO_UPDATE: "false" }).AGY_CLI_DISABLE_AUTO_UPDATE, "true");
 });
 
 const archive = path.join(root, "devkit", "cache", codexRelease.asset + ".tar.gz");

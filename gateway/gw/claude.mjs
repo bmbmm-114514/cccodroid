@@ -372,6 +372,8 @@ export function claudeEnv(o = {}) {
   for (const [k, v] of Object.entries(p.extraEnv || {})) {
     if (/^[A-Z_][A-Z0-9_]*$/.test(k) && !EXTRA_ENV_DENY.test(k)) env[k] = String(v);
   }
+  // Claude 版本由 App 的更新页管理，包括用户固定的版本。
+  env.DISABLE_AUTOUPDATER = "1";
   // extraEnv 是厂商配置里的不可信字段，最后再清一次封口变量：上面的 sealEnv() 在它之前跑，
   // 不这样这里能把 managed settings / 插件 seed 目录重新打开（审查 11-05）
   sealEnv(env);

@@ -56,6 +56,31 @@ export async function codexOptions({ home = CFG.home, verifyBinary = verifiedCod
   }
   const wrapper = enosysRun();
   const args = wrapper ? ["-f", binary] : [];
+  // The app manages the CLI version in Settings. Both launchers leave the user profile intact.
+  args.push("-c", "check_for_update_on_startup=false");
   if (!terminal) args.push("app-server", "--listen", "stdio://");
   return { command: wrapper || binary, args, cwd: terminal ? process.cwd() : CFG.workspace, env };
+}
+
+// Keep one app-server for the shared profile. Switch executable between operations,
+// after outstanding approvals, account requests and device login have finished.
+export function managedCodexClient(resolveBinary, openClient, loginPending) {
+  let current, opening, users = 0;
+  async function acquire() {
+    if (current && (users || loginPending())) return current.client;
+    const binary = await resolveBinary();
+    if (binary !== current?.binary) {
+      const client = await openClient(binary);
+      current?.client.close();
+      current = { binary, client };
+    }
+    return current.client;
+  }
+  return async function useClient(operation) {
+    opening ??= acquire().finally(() => { opening = null; });
+    const pending = opening;
+    users++;
+    try { return await operation(await pending); }
+    finally { users--; }
+  };
 }

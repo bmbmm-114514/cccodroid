@@ -527,6 +527,11 @@
   $("dev-a11y-sys").addEventListener("click", () => appPost("/api/app/a11y_settings"));
   $("dev-retry").addEventListener("click", () => loadDev());
 
+  if (typeof window.CCApp?.showAgentUpdates === "function") {
+    $("upd-agents").classList.remove("hidden");
+    $("upd-open-agents").addEventListener("click", () => window.CCApp.showAgentUpdates());
+  }
+
   // 打开更新页时自动查一次：正在查、正在下/装，或 20 秒内刚查过就只刷新显示
   async function updOnOpen() {
     const visit = setVisit, st = await loadUpd();

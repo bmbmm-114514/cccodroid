@@ -16,7 +16,8 @@ function fake(custom, caps = { sessionCapabilities: { resume: {} } }) {
   const calls = [];
   const options = {
     command: "/fixture/agy", timeoutMs: 500,
-    spawnProcess(bin, args) {
+    spawnProcess(bin, args, { env }) {
+      assert.equal(env.AGY_CLI_DISABLE_AUTO_UPDATE, "true");
       assert.equal(args.includes("--dangerously-skip-permissions"), false);
       const child = new EventEmitter();
       child.stdout = new PassThrough();
@@ -103,7 +104,8 @@ test("cancel interrupts a native prompt, clears pending approvals and releases i
 test("official Google login URL, one-time code delivery, cancel and retry",async()=>{
   assert.equal(agyState().login,null);
   let cli, submitted="";
-  const options={command:"/fake/agy",spawnProcess(_,args){
+  const options={command:"/fake/agy",spawnProcess(_,args,{env}){
+    assert.equal(env.AGY_CLI_DISABLE_AUTO_UPDATE,"true");
     cli=new EventEmitter(); cli.stdout=new PassThrough();cli.stderr=new PassThrough();
     cli.stdin=new Writable({write(buf,_,cb){submitted=buf.toString();cb();}});
     cli.kill=()=>{};

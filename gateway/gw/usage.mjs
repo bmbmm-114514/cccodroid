@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import net from "node:net";
+import { nativeRequest } from "./native-request.mjs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { CFG, LIVE, HERE, PATHS, PREFIX, log, tz } from "./config.mjs";
@@ -498,18 +498,9 @@ export function deviceMcpConfig() {
 }
 
 export function privCall(req, timeoutMs = 20000) {
-  return new Promise((resolve) => {
-    if (!PREFIX) {
-      if (req.op === "status") return devPrivStatus().then(resolve);
-      return resolve({ ok: false, state: "unsupported", message: tz("开发端的 Shizuku 由 Shizuku 应用自己管理（priv 走 rish）") });
-    }
-    const s = net.connect({ path: process.env.CCAPP_PRIV_SOCK || "/data/data/cc.agentui/files/.priv.sock" }, () => s.write(JSON.stringify(req) + "\n"));
-    let buf = "";
-    const t = setTimeout(() => { s.destroy(); resolve({ ok: false, message: tz("超时") }); }, timeoutMs);
-    s.on("data", (d) => (buf += d));
-    s.on("end", () => { clearTimeout(t); try { resolve(JSON.parse(buf)); } catch { resolve({ ok: false, message: buf.slice(0, 200) }); } });
-    s.on("error", (e) => { clearTimeout(t); resolve({ ok: false, state: "unreachable", message: e.message }); });
-  });
+  if (PREFIX) return nativeRequest(req, timeoutMs);
+  if (req.op === "status") return devPrivStatus();
+  return Promise.resolve({ ok: false, state: "unsupported", message: tz("开发端的 Shizuku 由 Shizuku 应用自己管理（priv 走 rish）") });
 }
 
 // ── 路由：/api/ledger /api/usage /api/usage/ /api/energy /api/energy/system ──

@@ -1,6 +1,8 @@
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { activeEngine, refreshInstalledEngines } from "./multi-binary.mjs";
+import { engineUpdateStatus, requestEngineUpdate } from "./multi-engine-updates.mjs";
 import { holdMultiActivity } from "./runs.mjs";
 import { agyModels, agyState, installAgy, loginAgy, respondAgy, runAgy, stopAgyLogin } from "./multi-agy.mjs";
 import { agyQuota } from "./multi-agy-quota.mjs";
@@ -15,12 +17,17 @@ import { providerById, keyOf } from "./providers.mjs";
 import { conversationStore, problem, recordTool } from "./multi-conversations.mjs";
 import { runClaude, handoffClaude, claudeModels, claudeProviders, claudeState } from "./multi-claude.mjs";
 import { createCodexClient } from "./multi-codex.mjs";
-import { codexOptions } from "./multi-codex-launch.mjs";
-import { installation, startInstall } from "./multi-codex-install.mjs";
+import { codexOptions, managedCodexClient } from "./multi-codex-launch.mjs";
+import { installation, startInstall, verifiedCodex } from "./multi-codex-install.mjs";
+
+async function requireEngine(agent) {
+  try { await activeEngine(agent); }
+  catch (error) { throw problem(error.message, 409); }
+}
 
 const agyAdapter = {
   async ready() {
-    if (!agyState().installed) throw problem("请先安装 Antigravity", 409);
+    await requireEngine("agy");
   },
   async run({ onEvent, ...options }) {
     return runAgy({ ...options, onEvent(e) {
@@ -30,7 +37,7 @@ const agyAdapter = {
     } });
   }
 };
-let clientPromise, repository, login = null, account = null, codexError = "", quota = [], refreshTask, refreshed = 0, loginTask;
+let repository, login = null, account = null, codexError = "", quota = [], refreshTask, refreshed = 0, loginTask;
 function applyLimits(snapshot) {
   const limits = snapshot?.rateLimits || snapshot?.rateLimitsByLimitId?.codex;
   if (!limits) return;
@@ -47,8 +54,9 @@ function setAccount(a) {
   if (account?.email !== a?.email || !a) quota = [];
   account = a ? { type: a.type, email: a.email || null } : null;
 }
-async function client() {
-  if (!clientPromise) clientPromise = codexOptions().then(options => createCodexClient({ ...options, onEvent(e) {
+const withClient = managedCodexClient(verifiedCodex, async binary => {
+  const options = await codexOptions({ verifyBinary: () => binary });
+  return createCodexClient({ ...options, onEvent(e) {
     if (e.type === "disconnect") {
       endLogin();
       setAccount(null);
@@ -59,20 +67,18 @@ async function client() {
     if (e.type === "quota") applyLimits(e);
     if (e.type === "account") { setAccount(e.account); refreshed = 0; }
     if (e.type === "login") { endLogin(); refreshed = 0; codexError = e.success ? "" : String(e.error || "Codex 登录失败"); }
-  } })).catch(e => { clientPromise = null; throw e; });
-  return clientPromise;
-}
+  } });
+}, () => !!login);
 function refreshAccount() {
   if (refreshTask || !installation().installed || Date.now()-refreshed < 60000) return;
   refreshed = Date.now();
-  refreshTask = (async () => {
-    const api = await client();
+  refreshTask = withClient(async api => {
     setAccount((await api.account()).account);
     if (account?.type === "chatgpt") {
       applyLimits(await api.limits());
       codexError = "";
     }
-  })().catch(e => { codexError = e.message; }).finally(() => { refreshTask = null; });
+  }).catch(e => { codexError = e.message; }).finally(() => { refreshTask = null; });
 }
 let loginRelease, loginTimeout;
 function endLogin() {
@@ -83,14 +89,13 @@ function endLogin() {
 }
 function deviceLogin() {
   if (login) return;
-  if (!loginTask) loginTask = (async () => {
-    const api = await client();
+  if (!loginTask) loginTask = withClient(async api => {
     const result = await api.login();
     loginRelease = holdMultiActivity();
     loginTimeout = setTimeout(endLogin, 15 * 60_000);
     login = { verificationUri: result.verificationUrl || result.verificationUri, userCode: result.userCode };
     codexError = "";
-  })().finally(() => { loginTask = null; });
+  }).finally(() => { loginTask = null; });
   return loginTask;
 }
 function availableProvider(id) {
@@ -100,23 +105,21 @@ function availableProvider(id) {
 }
 const codexAdapter = {
   async ready() {
-    if (!installation().installed) throw problem("请先安装 Codex", 409);
-    if ((await (await client()).account()).account?.type !== "chatgpt") throw problem("请先使用 ChatGPT 登录 Codex", 409);
+    await requireEngine("codex");
+    if ((await withClient(api => api.account())).account?.type !== "chatgpt") throw problem("请先使用 ChatGPT 登录 Codex", 409);
   },
   async run({ sessionId, onEvent, ...options }) {
-    const api = await client();
-    const result = await api.run({ ...options, threadId: sessionId, onEvent(e) {
+    const result = await withClient(api => api.run({ ...options, threadId: sessionId, onEvent(e) {
       if (e.type === "approval") {
         const p = e.params || {};
         onEvent({ ...e, label: [e.method, p.command, p.cwd, p.reason, p.grantRoot, p.permissions && JSON.stringify(p.permissions)].filter(Boolean).join("\n").slice(0, 4800),
           respond: allow => api.respond(e.id, allow) });
       } else onEvent(e);
-    } });
+    } }));
     return { sessionId: result.threadId, text: result.text };
   },
   async handoff({ sessionId, provider, ...options }) {
-    const api = await client();
-    return api.handoff({ ...options, threadId: sessionId, provider: provider ? availableProvider(provider) : undefined });
+    return withClient(api => api.handoff({ ...options, threadId: sessionId, provider: provider ? availableProvider(provider) : undefined }));
   }
 };
 function store() {
@@ -181,6 +184,7 @@ export async function routeMulti(req, res, u, p) {
   if (!p.startsWith("/api/multi/")) return NEXT;
   const action = p.slice("/api/multi/".length);
   try {
+    if (action === "engine-updates" && req.method === "GET") return sendJson(res, 200, await engineUpdateStatus());
     if (action === "preferences" && req.method === "GET") return sendJson(res, 200, getChoice(u.searchParams.get("provider")));
     if (action === "models" && req.method === "GET") {
       const agent = u.searchParams.get("agent");
@@ -190,15 +194,16 @@ export async function routeMulti(req, res, u, p) {
       let catalog;
       if (agent === "claude") catalog = await claudeModels(model, provider || "anthropic");
       else if (agent === "codex") {
-        if (!installation().installed) throw problem("请先安装 Codex", 409);
-        catalog = await (await client()).models(model);
+        await requireEngine("codex");
+        catalog = await withClient(api => api.models(model));
       } else if (agent === "agy") {
-        if (!agyState().installed) throw problem("请先安装 Antigravity", 409);
+        await requireEngine("agy");
         catalog = await agyModels({model});
       } else throw problem("请选择有效的 Agent");
       return sendJson(res, 200, { agent, ...catalog });
     }
     if (action === "state" && req.method === "GET") {
+      await refreshInstalledEngines();
       const db = store();
       const id = u.searchParams.get("id");
       refreshAccount();
@@ -216,15 +221,16 @@ export async function routeMulti(req, res, u, p) {
     catch (e) { throw problem("请求正文无效", e.status || 400); }
     if (!b || typeof b !== "object" || Array.isArray(b)) throw problem("请求正文无效");
     switch (action) {
+      case "engine-updates": return sendJson(res, 200, requestEngineUpdate(b));
       case "preferences": return sendJson(res, 200, saveChoice(b));
       case "edit": store().edit(b.id, b); break;
       case "create": return sendJson(res, 201, { id: await createConversation(b) });
       case "send": store().send(b); break;
       case "stop": store().stop(b.id); break;
       case "approve": store().approve(b.id, b.approvalId, b.allow); break;
-      case "agy-install": installAgy(); break;
+      case "agy-install": await installAgy(); break;
       case "agy-login": await loginAgy(b.code); break;
-      case "install": startInstall(); break;
+      case "install": await startInstall(); break;
       case "login": await deviceLogin(); break;
       default: throw problem("找不到接口", 404);
     }

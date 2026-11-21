@@ -442,6 +442,12 @@ final class Installer {
 
     static String sha256(File f) throws IOException {
         try (InputStream in = new FileInputStream(f)) {
+            return sha256(in);
+        }
+    }
+
+    static String sha256(InputStream in) throws IOException {
+        try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] buf = new byte[1 << 20];
             for (int r; (r = in.read(buf)) > 0; ) md.update(buf, 0, r);

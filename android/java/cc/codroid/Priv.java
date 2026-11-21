@@ -428,8 +428,18 @@ final class Priv {
                     ShizukuSetup.get(ctx).setAutostart(on); resp = status(); break;
                 }
                 // 更新（Updater）
+                case "engine_update_authorized": resp = EngineUpdatePins.preflight(req); break;
+                case "engine_update_pins": resp = EngineUpdatePins.list(ctx); break;
+                case "engine_update_activate": resp = EngineUpdatePins.approve(ctx, req); break;
                 case "upd_status": resp = Updater.get(ctx).status(); break;
-                case "upd_check": Updater.get(ctx).checkAsync(true); resp = Updater.get(ctx).status(); break;
+                case "upd_check": {
+                    String item = req.optString("item", "");
+                    if ("claude".equals(item)) Updater.get(ctx).checkClaudeOnlyAsync();
+                    else if (item.isEmpty()) Updater.get(ctx).checkAsync(true);
+                    else { resp = new JSONObject().put("ok", false).put("message", Tr.t("未知项 ") + item); break; }
+                    resp = Updater.get(ctx).status();
+                    break;
+                }
                 case "upd_apply": {
                     String item = req.optString("item"), ver = req.optString("version", "");
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}

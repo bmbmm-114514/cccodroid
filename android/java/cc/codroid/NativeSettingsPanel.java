@@ -22,12 +22,12 @@ public class NativeSettingsPanel {
             showDevice(h, page);
             return;
         }
+        if ("set-update".equals(id)) { showUpdate(h, page); return; }
         LinearLayout v = PixelUi.group(page);
         v.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(20));
         if ("set-claude".equals(id)) showClaude(h, v);
         else if ("set-run".equals(id)) showRun(h, v);
         else if ("set-storage".equals(id)) showStorage(h, v);
-        else if ("set-update".equals(id)) showUpdate(h, v);
         else if ("set-trouble".equals(id)) showTrouble(h, v);
     }
 
@@ -322,23 +322,26 @@ public class NativeSettingsPanel {
         });
     }
 
-    private static void showUpdate(NativeHome h, LinearLayout v) {
-        h.text(v, "软件版本与工具包");
+    private static void showUpdate(NativeHome h, LinearLayout page) {
+        TextView agents = PixelUi.label(h.a, "Agent 更新", 14, "primary");
+        agents.setPaddingRelative(h.dp(12), h.dp(10), h.dp(12), h.dp(4));
+        page.addView(agents);
+        NativeAgentUpdates.attach(h.a, page);
+        LinearLayout v = NativeStatusViews.section(page, "应用与工具包");
+        v.setPadding(h.dp(16), h.dp(12), h.dp(16), h.dp(16));
         String appVer = "未知";
         try { appVer = h.a.getPackageManager().getPackageInfo(h.a.getPackageName(), 0).versionName; } catch (Exception ignored) {}
         h.text(v, "当前客户端版本: " + appVer);
-        TextView tvCli = h.text(v, "Claude CLI 版本: 检测中…");
         TextView tvStatus = h.text(v, "工具包状态: 点击下方检测");
         h.button(v, "查看开源仓库 (GitHub)", () -> h.a.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/bmbmm-114514/cccodroid"))));
         Runnable refresh = () -> h.get("/api/app/upd_status", r -> {
             JSONArray items = r.optJSONArray("items");
-            if (items == null) { tvCli.setText(""); tvStatus.setText(r.optString("message", "工具包状态未知")); return; }
+            if (items == null) { tvStatus.setText(r.optString("message", "工具包状态未知")); return; }
             StringBuilder status = new StringBuilder();
             for (int i = 0; i < items.length(); i++) {
                 JSONObject item = items.optJSONObject(i);
-                if (item == null) continue;
+                if (item == null || "claude".equals(item.optString("id"))) continue;
                 String version = item.optString("current");
-                if ("claude".equals(item.optString("id"))) tvCli.setText("Claude Code " + version);
                 status.append(item.optString("name")).append(" ").append(version).append(" · ").append(item.optString("state")).append("\n");
             }
             JSONObject verify = r.optJSONObject("verify");

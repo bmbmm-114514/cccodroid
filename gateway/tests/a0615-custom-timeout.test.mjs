@@ -10,8 +10,9 @@ test("#203 自定义厂商默认带 API_TIMEOUT_MS / 重试；extraEnv 写了的
   const e1 = claudeEnv({ provider: base });
   assert.equal(e1.API_TIMEOUT_MS, "90000");
   assert.equal(e1.CLAUDE_CODE_MAX_RETRIES, "3");
-  const e2 = claudeEnv({ provider: { ...base, extraEnv: { API_TIMEOUT_MS: "300000" } } });
+  const e2 = claudeEnv({ provider: { ...base, extraEnv: { API_TIMEOUT_MS: "300000", DISABLE_AUTOUPDATER: "0" } } });
   assert.equal(e2.API_TIMEOUT_MS, "300000", "用户写的盖掉默认");
+  assert.equal(e2.DISABLE_AUTOUPDATER, "1", "厂商配置不能覆盖 App 的版本选择");
   assert.equal(e2.CLAUDE_CODE_MAX_RETRIES, "3");
   assert.equal(claudeEnv({ provider: providerById("deepseek") }).API_TIMEOUT_MS, providerById("deepseek").extraEnv?.API_TIMEOUT_MS);
 });

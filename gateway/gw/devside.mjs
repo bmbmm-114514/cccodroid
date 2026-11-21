@@ -31,7 +31,7 @@ const cmpVer = (a, b) => {
 function claudeVersionOf(bin) {
   return new Promise((ok) => {
     const pre = GLIBC_PRELOAD ? ["--preload", GLIBC_PRELOAD] : [];
-    execFile(PATHS.claudeLoader, ["--library-path", PATHS.claudeLib, ...pre, bin, "--version"], { timeout: 30000, env: glibcEnv() }, (e, out) => {
+    execFile(PATHS.claudeLoader, ["--library-path", PATHS.claudeLib, ...pre, bin, "--version"], { timeout: 30000, env: glibcEnv({ ...process.env, DISABLE_AUTOUPDATER: "1" }) }, (e, out) => {
       const m = String(out || "").match(/\d+\.\d+\.\d+/);
       ok(m ? m[0] : "");
     });
@@ -184,7 +184,10 @@ async function devApp(op, b) {
     else if (!devUpd.claude.current) devUpd.claude.current = await claudeVersionOf(PATHS.claude);
     return devUpdStatus();
   }
-  if (op === "upd_check") { devUpdCheck(); await new Promise((r) => setTimeout(r, 200)); return devUpdStatus(); }
+  if (op === "upd_check") {
+    if (b.item && b.item !== "claude") return { ok: false, message: tz("未知项 ") + b.item };
+    devUpdCheck(); await new Promise((r) => setTimeout(r, 200)); return devUpdStatus();
+  }
   if (op === "upd_set") {
     if (b.channel === "pinned") return { ok: false, message: tz("开发端不支持固定版本（只跟随 stable / latest）") };
     if (typeof b.auto === "boolean") devUpd.auto = b.auto;
@@ -243,6 +246,7 @@ async function claudeVersions(force) {
 
 // /api/app/* 各操作收哪些字段（对照 Priv.java、Updater.set、Notify.set、DeviceTools.set）
 const APP_FIELDS = {
+  upd_check: { item: "string" },
   upd_apply: { item: "string", version: "string" },
   upd_set: { auto: "boolean", channel: "string", version: "string", flavor: "string" },
   upd_verify: { full: "boolean" }, upd_repair: { full: "boolean" },

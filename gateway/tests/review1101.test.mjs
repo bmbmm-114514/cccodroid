@@ -41,6 +41,7 @@ test("低-2 插件 / 市场 / MCP 的名字以横线开头直接拒，不交给 
 });
 
 test("低-3 /api/app 只转认得的字段、认得的类型", async () => {
+  assert.equal((await post("/api/app/upd_check", { item: ["claude"] })).status, 400);
   assert.equal((await post("/api/app/upd_set", { auto: "yes" })).status, 400);
   assert.equal((await post("/api/app/share_file", { path: ["/x"] })).status, 400);
   assert.equal((await post("/api/app/dev_set", { idle: "5" })).status, 400);

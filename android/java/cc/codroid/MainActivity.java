@@ -1917,6 +1917,9 @@ public class MainActivity extends Activity {
             @android.webkit.JavascriptInterface public void chooseFrontend(String k) {
                 if (Env.bridgeOk(k)) ui.post(() -> { if (appearanceMainPage(appearanceOwner)) NativeAppearance.choose(MainActivity.this); });
             }
+            @android.webkit.JavascriptInterface public void showAgentUpdates(String k) {
+                if (Env.bridgeOk(k)) ui.post(() -> { if (appearanceMainPage(appearanceOwner)) NativeAgentUpdates.show(MainActivity.this); });
+            }
             @android.webkit.JavascriptInterface public void chooseFrontendState(String k, String json) {
                 if (!Env.bridgeOk(k)) return;
                 ui.post(() -> {

@@ -3,6 +3,7 @@ package cc.codroid;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
 import android.os.Build;
+import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructStat;
@@ -53,8 +54,10 @@ final class BundledEngines {
         }
         File dir = new File(env.home, ".local/share/multi-agent");
         Files.createDirectories(dir.toPath());
-        JSONObject codex = pins.getJSONObject("codex"), agy = pins.getJSONObject("agy");
-        installFile(assets, "Codex", "codex.tar.gz", codex, new File(dir, "codex-" + codex.getString("version")), true, ins, checked);
+        JSONObject updates = null;
+        try { updates = EngineUpdatePins.list(env.context).getJSONObject("releases"); }
+        catch (Exception e) { android.util.Log.w("BundledEngines", "无法读取已确认的 Agent 更新", e); }
+        prepareAgent(assets, dir, "codex", "Codex", pins.getJSONObject("codex"), updates, ins, checked);
         // 0.1.x used the standalone server. Reclaim its space only after the full client is ready.
         File oldServer = new File(dir, "codex-app-server-0.166.0");
         try {
@@ -63,19 +66,74 @@ final class BundledEngines {
                 Files.delete(oldServer.toPath());
             }
         } catch (IOException ignored) { /* The current client is ready even if cleanup must wait. */ }
-        installFile(assets, "Antigravity", "agy.tar.gz", agy, new File(dir, "agy-" + agy.getString("version")), true, ins, checked);
+        prepareAgent(assets, dir, "agy", "Antigravity", pins.getJSONObject("agy"), updates, ins, checked);
     }
 
-    // Cache a successful content check across app launches. The gateway separately authenticates the executable before use.
-    private static String fingerprint(File file, long size, String hash) {
-        try {
-            StructStat st = Os.lstat(file.getPath());
-            if (!OsConstants.S_ISREG(st.st_mode) || (st.st_mode & 0500) != 0500 || st.st_size != size) return null;
-            String fp = hash + ":" + st.st_dev + ":" + st.st_ino + ":" + st.st_size + ":" + st.st_mtime + ":" + st.st_ctime;
-            if (Build.VERSION.SDK_INT >= 27) return fp + ":" + st.st_mtim.tv_nsec + ":" + st.st_ctim.tv_nsec;
-            // API 26 only exposes whole-second ctime. Cache after that timestamp has settled.
-            return System.currentTimeMillis() / 1000 - st.st_ctime > 2 ? fp : "";
-        } catch (android.system.ErrnoException e) { return null; }
+    private static void prepareAgent(AssetManager assets, File dir, String agent, String label, JSONObject bundled,
+                                     JSONObject updates, Installer ins, SharedPreferences checked) throws Exception {
+        String baseVersion = bundled.getString("version");
+        JSONObject update = updates == null ? null : updates.optJSONObject(agent);
+        if (update != null && Updater.cmpVer(update.getString("version"), baseVersion) > 0) {
+            String digest = update.getString("sha256");
+            File executable = new File(new File(dir, "updates"), agent + "-" + update.getString("version") + "-" + digest);
+            try {
+                if (usable(executable, update.getLong("bytes"), digest, "update-" + agent, checked)) return;
+            } catch (IOException e) { android.util.Log.w("BundledEngines", "无法校验已更新的 " + label, e); }
+        }
+        installFile(assets, label, agent + ".tar.gz", bundled, new File(dir, agent + "-" + baseVersion), true, ins, checked);
+    }
+
+    private static String fingerprint(StructStat st, String hash) {
+        String fp = hash + ":" + st.st_dev + ":" + st.st_ino + ":" + st.st_size + ":" + st.st_mtime + ":" + st.st_ctime;
+        if (Build.VERSION.SDK_INT >= 27) fp += ":" + st.st_mtim.tv_nsec + ":" + st.st_ctim.tv_nsec;
+        return fp;
+    }
+
+    private static boolean cacheable(StructStat st) {
+        // API 26 exposes only whole seconds. Never reuse or store a recent coarse timestamp.
+        return Build.VERSION.SDK_INT >= 27 || System.currentTimeMillis() / 1000 - st.st_ctime > 2;
+    }
+
+    private static boolean usable(File file, long size, String hash, String label, SharedPreferences checked)
+            throws IOException {
+        // Recheck once if a gateway repair or update replaces the path during verification.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            FileDescriptor fd = null;
+            try {
+                fd = Os.open(file.getPath(), OsConstants.O_RDONLY | OsConstants.O_NOFOLLOW | OsConstants.O_NONBLOCK, 0);
+                StructStat before = Os.fstat(fd);
+                if (!OsConstants.S_ISREG(before.st_mode) || before.st_size != size || (before.st_mode & 0400) == 0) return false;
+                String fp = fingerprint(before, hash);
+                boolean executable = (before.st_mode & 0100) != 0;
+                if (executable && cacheable(before) && fp.equals(checked.getString(label, null))) {
+                    if (fp.equals(fingerprint(Os.lstat(file.getPath()), hash))) return true;
+                    continue;
+                }
+                try (FileInputStream in = new FileInputStream(fd)) {
+                    boolean matches = hash.equals(Installer.sha256(in));
+                    if (!fp.equals(fingerprint(Os.fstat(fd), hash))) continue;
+                    if (!matches) return false;
+                    if (!executable) {
+                        // Restore a lost execute bit only on the exact file whose contents we verified.
+                        if (before.st_nlink != 1) return false;
+                        Os.fchmod(fd, (before.st_mode & 0777) | 0100);
+                    }
+                    StructStat ready = Os.fstat(fd);
+                    String stamp = fingerprint(ready, hash);
+                    if ((ready.st_mode & 0500) != 0500 || (executable && !fp.equals(stamp))
+                            || !stamp.equals(fingerprint(Os.lstat(file.getPath()), hash))) continue;
+                    if (executable && cacheable(before)) checked.edit().putString(label, stamp).apply();
+                    return true;
+                }
+            } catch (ErrnoException e) {
+                if (e.errno == OsConstants.ENOENT || e.errno == OsConstants.ELOOP || e.errno == OsConstants.EACCES
+                        || e.errno == OsConstants.EPERM || e.errno == OsConstants.ENXIO) return false;
+                throw new IOException("无法检查 " + label, e);
+            } finally {
+                if (fd != null && fd.valid()) try { Os.close(fd); } catch (ErrnoException ignored) { }
+            }
+        }
+        return false;
     }
 
     private static void installFile(AssetManager assets, String label, String asset, JSONObject pin, File target,
@@ -84,14 +142,7 @@ final class BundledEngines {
         String hash = pin.getString("sha256");
         Path partial = new File(target.getParentFile(), target.getName() + ".bundle-part").toPath();
         Files.deleteIfExists(partial);
-        String fp = fingerprint(target, size, hash);
-        if (fp != null) {
-            if (!fp.isEmpty() && fp.equals(checked.getString(label, null))) return;
-            if (hash.equals(Installer.sha256(target)) && fp.equals(fingerprint(target, size, hash))) {
-                if (!fp.isEmpty()) checked.edit().putString(label, fp).apply();
-                return;
-            }
-        }
+        if (usable(target, size, hash, label, checked)) return;
         ins.step("正在从安装包准备 " + label + "…");
         Files.createFile(partial);
         try {
@@ -118,9 +169,13 @@ final class BundledEngines {
             }
             if (!Installer.hex(digest.digest()).equals(hash)) throw new IOException(label + " 校验失败");
             if (!partial.toFile().setExecutable(true, true)) throw new IOException(label + " 设置执行权限失败");
+            StructStat staged = Os.lstat(partial.toString());
             Files.move(partial, target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            fp = fingerprint(target, size, hash);
-            if (fp != null && !fp.isEmpty()) checked.edit().putString(label, fp).apply();
+            StructStat ready = Os.lstat(target.getPath());
+            if (staged.st_dev == ready.st_dev && staged.st_ino == ready.st_ino && ready.st_size == size
+                    && OsConstants.S_ISREG(ready.st_mode) && (ready.st_mode & 0500) == 0500 && cacheable(ready)) {
+                checked.edit().putString(label, fingerprint(ready, hash)).apply();
+            }
             ins.bundleProgress(size, size);
         } finally { Files.deleteIfExists(partial); }
     }

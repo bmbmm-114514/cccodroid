@@ -57,7 +57,8 @@ final class Updater {
     final Context ctx;
     final Env env;
     private final Item app = new Item("app", "cccodroid"), devkit = new Item("devkit", "开发工具包"), claude = new Item("claude", "Claude Code");
-    private volatile boolean checking;
+    private volatile boolean checking, checkingClaude;
+    private final Object claudeCheckLock = new Object();
     private volatile String lastError = "";
     /** APK 已下好但因为工具包在忙而推迟安装；user=用户点的（走系统确认），否则静默规则 */
     private volatile boolean appWaiting, appWaitingUser;
@@ -221,12 +222,12 @@ final class Updater {
     JSONObject status() throws Exception {
         refreshCurrent();
         // 结果只在内存里：进程重启后第一次有人来看（打开设置页）就顺手查一次（只查，不自动装）
-        if (!checking && "unknown".equals(app.state) && "unknown".equals(claude.state)) checkAsync(true);
+        if (!checking && !checkingClaude && "unknown".equals(app.state) && "unknown".equals(claude.state)) checkAsync(true);
         JSONArray a = new JSONArray();
         for (Item i : new Item[]{app, devkit, claude}) a.put(i.json());
         return new JSONObject().put("ok", true).put("auto", auto()).put("channel", channel()).put("pin", pinVer())
             .put("flavor", flavor()).put("flavorPref", flavorPref()).put("only36", only36()).put("wantFlavor", wantFlavor())
-            .put("lastCheck", prefs().getLong("lastCheck", 0)).put("checking", checking).put("error", lastError).put("items", a)
+            .put("lastCheck", prefs().getLong("lastCheck", 0)).put("checking", checking || checkingClaude).put("error", lastError).put("items", a)
             .put("verify", lastVerify == null ? JSONObject.NULL : lastVerify);
     }
 
@@ -440,12 +441,27 @@ final class Updater {
 
     // ── 检查 ───────────────────────────────────────────────────────────
     /** 后台线程里跑。manual=true：用户点的"检查更新"——只查不自动装大件；auto 模式下顺带按规则自动下载/安装 */
-    void checkAsync(boolean manual) {
+    synchronized void checkAsync(boolean manual) {
         if (checking) return;
         checking = true;
         new Thread(() -> {
             try { check(manual); } finally { checking = false; }
         }, "upd-check").start();
+    }
+
+    synchronized void checkClaudeOnlyAsync() {
+        if (checking || checkingClaude) return;
+        checkingClaude = true;
+        new Thread(() -> {
+            try {
+                refreshCurrent();
+                checkClaudeStatus();
+            } finally { checkingClaude = false; }
+        }, "upd-check-claude").start();
+    }
+
+    private void checkClaudeStatus() {
+        try { checkClaude(); } catch (Exception e) { claude.set("error", Tr.t("连不上 downloads.claude.ai：") + e.getMessage()); }
     }
 
     private void check(boolean manual) {
@@ -457,7 +473,7 @@ final class Updater {
             checkApp(new JSONArray(new String(Installer.httpGetSmall(url), StandardCharsets.UTF_8)));
         } catch (Exception e) { app.set("error", e.getMessage()); }
         if (!devkitMoving()) devkit.set("uptodate", Tr.t("工具包版本由当前安装包指定"));
-        try { checkClaude(); } catch (Exception e) { claude.set("error", Tr.t("连不上 downloads.claude.ai：") + e.getMessage()); }
+        checkClaudeStatus();
         prefs().edit().putLong("lastCheck", System.currentTimeMillis()).apply();
         if (auto() && !manual && env.devkitReady()) autoApply();      // 首装期间不自动装任何东西，Claude Code 也由首装流程来装
         releaseApp();         // 工具包停在"已下载"没去装（比如有任务在跑）时，别让 APK 一直等着
@@ -717,6 +733,10 @@ final class Updater {
     }
 
     private void checkClaude() throws Exception {
+        synchronized (claudeCheckLock) { checkClaudeChannel(); }
+    }
+
+    private void checkClaudeChannel() throws Exception {
         // 版本号：官方 → cccodroid.net 镜像 → npm 镜像的 dist-tags（Anthropic 在 npm 上用同名的 stable / latest 标签）。
         // 这里只是「有没有新版」；真正下载时 install-claude.mjs 会按官方清单的 sha256 或 npm 签名校验
         String v = null, why = "";

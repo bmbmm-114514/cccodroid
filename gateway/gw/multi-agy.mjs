@@ -47,7 +47,7 @@ export function agyState() {
 export async function agyUsageOptions() {
   return { command: await verifiedAgy(), cwd: CFG.home, env: personalEnv() };
 }
-export function installAgy() { startAgyInstall(); return agyState(); }
+export async function installAgy() { await startAgyInstall(); return agyState(); }
 
 export async function loginAgy(input = {}, options = {}) {
   const code = typeof input === "string" ? input : input?.code;
@@ -137,7 +137,7 @@ const acpInit = {
 
 function acpProcess(command, cwd, options, dispatch) {
   return new AgentTransport({ ...options, cwd, command, args: ["acp", "--stdio"],
-    jsonrpc: "2.0", label: "Antigravity", env: options.env || personalEnv() }, dispatch, () => {});
+    jsonrpc: "2.0", label: "Antigravity", env: personalEnv(options.env) }, dispatch, () => {});
 }
 async function initializePersonal(rpc) {
   const revision = accountRevision;

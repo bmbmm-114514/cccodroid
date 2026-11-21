@@ -3,52 +3,23 @@
 import fs from "node:fs";
 import { holdMultiActivity } from "./runs.mjs";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
-import { pipeline } from "node:stream/promises";
-import { createGunzip } from "node:zlib";
-import { agyBinary as binary, verifiedAgy } from "./multi-binary.mjs";
+import { randomUUID } from "node:crypto";
+import { unpackAgyArchive } from "./multi-agy-update.mjs";
+import { engineInstallation, agyBinary as binary, verifiedAgy } from "./multi-binary.mjs";
 export { verifiedAgy };
 
 import { agyRelease } from "./engine-releases.mjs";
 export const agyVersion = agyRelease.version;
-const { archive: url, archiveBytes: size, archiveSha512: sha512, sha256: executableSha, bytes: binaryBytes } = agyRelease;
+const url = agyRelease.archive;
 const dir = path.dirname(binary);
-let installing = null, error = "";
+let checking = null, installing = null, error = "";
 
 export function agyInstallation() {
-  return { installed: fs.existsSync(binary), installing: !!installing, version: agyVersion, error };
+  return { ...engineInstallation("agy"), installing: !!installing, error };
 }
 
-export async function unpackAgy(source, temp) {
-  const packed = createHash("sha512"), unpacked = createHash("sha256");
-  let bytes = 0, remaining = binaryBytes, header = Buffer.alloc(0), parsed = false;
-  await pipeline(source, async function* (input) {
-    for await (const part of input) {
-      bytes += part.length;
-      if (bytes > size) throw new Error("Antigravity 下载大小超过发行清单");
-      packed.update(part);
-      yield part;
-    }
-  }, createGunzip(), async function* (input) {
-    for await (let part of input) {
-      if (!parsed) {
-        header = Buffer.concat([header, part]);
-        if (header.length < 512) continue;
-        const name = header.toString("utf8", 0, 100).split("\0")[0];
-        const declared = parseInt(header.toString("ascii", 124, 136).trim(), 8);
-        if (name !== "antigravity" || header[156] !== 48 || declared !== binaryBytes) throw new Error("Antigravity 压缩包格式异常");
-        part = header.subarray(512);
-        header = Buffer.alloc(0);
-        parsed = true;
-      }
-      const payload = part.subarray(0, remaining);
-      remaining -= payload.length;
-      if (payload.length) { unpacked.update(payload); yield payload; }
-    }
-  }, fs.createWriteStream(temp, { flags: "wx", mode: 0o700 }));
-  if (remaining || bytes !== size || packed.digest("hex") !== sha512 || unpacked.digest("hex") !== executableSha) {
-    throw new Error("Antigravity 官方发布校验失败");
-  }
+export function unpackAgy(source, temp) {
+  return unpackAgyArchive(source, temp, agyRelease);
 }
 
 async function download() {
@@ -63,11 +34,25 @@ async function download() {
   } finally { await fs.promises.rm(temp, { force: true }); }
 }
 
-export function startAgyInstall() {
+async function checkBeforeDownload() {
+  error = "";
+  try {
+    await fs.promises.access(await verifiedAgy(), fs.constants.X_OK);
+    return;
+  } catch {
+    // A missing, damaged or unusable executable can be repaired from the pinned archive.
+  }
+  const release = holdMultiActivity();
+  installing = download().catch(e => { error = e.message; }).finally(() => {
+    installing = null;
+    release();
+  });
+}
+
+export async function startAgyInstall() {
   if (!installing) {
-    const release = holdMultiActivity();
-    error = "";
-    installing = download().catch(e => { error = e.message; }).finally(() => { installing = null; release(); });
+    checking ??= checkBeforeDownload().finally(() => { checking = null; });
+    await checking;
   }
   return agyInstallation();
 }
