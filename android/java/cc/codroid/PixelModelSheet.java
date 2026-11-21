@@ -45,8 +45,7 @@ final class PixelModelSheet {
         this.host = host;
         this.ui = ui;
 
-        dialog = new BottomSheetDialog(ui);
-        dialog.setDismissWithAnimation(true);
+        dialog = PixelChoiceSheet.createDialog(ui);
         sheetView = PixelChoiceSheet.content(ui);
 
         LinearLayout headerBar = new LinearLayout(ui);

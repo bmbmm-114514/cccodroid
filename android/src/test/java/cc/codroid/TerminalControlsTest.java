@@ -50,6 +50,8 @@ public class TerminalControlsTest {
         for (String label : Arrays.asList("Ctrl+C", "Ctrl+D", "Ctrl+Z", "Tab", "Esc", "↑", "↓", "←", "→")) {
             View key = find(root, TextView.class, label);
             assertTrue(key.getWidth() >= 48 && key.getHeight() >= 48);
+            TextView text = (TextView) key;
+            assertTrue(text.getLayout().getWidth() <= key.getWidth());
             assertTrue(key.performClick());
         }
         assertEquals(Arrays.asList("\u0003", "\u0004", "\u001a", "\t", "\u001b",

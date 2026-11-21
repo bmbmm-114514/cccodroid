@@ -35,6 +35,19 @@ final class PixelChoiceSheet {
         return layout;
     }
 
+    static BottomSheetDialog createDialog(Context ui) {
+        BottomSheetDialog dialog = new BottomSheetDialog(ui) {
+            @Override public void cancel() {
+                View sheet = findViewById(com.google.android.material.R.id.design_bottom_sheet);
+                // A hidden-state animation cannot finish before the first layout.
+                if (sheet == null || !sheet.isLaidOut()) setDismissWithAnimation(false);
+                super.cancel();
+            }
+        };
+        dialog.setDismissWithAnimation(true);
+        return dialog;
+    }
+
     static void configure(BottomSheetDialog dialog, Context ui, int maxWidthDp) {
         BottomSheetBehavior<?> behavior = dialog.getBehavior();
         behavior.setMaxWidth(PixelUi.dp(ui, maxWidthDp));
@@ -45,9 +58,7 @@ final class PixelChoiceSheet {
 
     static BottomSheetDialog show(Context ui, String title, List<String> labels, int checked,
                                   IntConsumer choose, Runnable addCustom) {
-        BottomSheetDialog dialog = new BottomSheetDialog(ui);
-        dialog.setDismissWithAnimation(true);
-
+        BottomSheetDialog dialog = createDialog(ui);
         LinearLayout root = content(ui);
         final Runnable[] pending = new Runnable[1];
         dialog.setOnDismissListener(ignored -> {

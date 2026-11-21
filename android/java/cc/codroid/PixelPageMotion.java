@@ -65,7 +65,7 @@ final class PixelPageMotion {
         // The preview is transient and never written to disk. Bound memory on large/foldable displays.
         float scale = Math.min(1f, (float) Math.sqrt(450000d / ((double) w * h)));
         Bitmap frame = Bitmap.createBitmap(Math.max(1, Math.round(w * scale)),
-                Math.max(1, Math.round(h * scale)), Bitmap.Config.RGB_565);
+                Math.max(1, Math.round(h * scale)), Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(frame);
         canvas.scale(scale, scale);
         try {
@@ -102,6 +102,7 @@ final class PixelPageMotion {
         progress = Math.max(0f, Math.min(1f, fraction));
         transform(page, progress, fromRight);
         corner = PixelUi.dp(page.getContext(), 28) * progress;
+        page.setElevation(PixelUi.dp(page.getContext(), 5) * progress);
         page.setClipToOutline(true);
         page.invalidateOutline();
     }
@@ -156,6 +157,7 @@ final class PixelPageMotion {
             v.setScaleX(1f);
             v.setScaleY(1f);
             v.setAlpha(1f);
+            v.setElevation(0f);
             v.setClipToOutline(false);
         }
         tracking = false;

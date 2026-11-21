@@ -94,7 +94,9 @@ final class TerminalControls {
 
                 MaterialButton key = PixelUi.button(c, spec.label, () -> send.test(spec.payload));
                 key.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-                key.setSingleLine(true);
+                key.setMaxLines(1);
+                // A horizontally scrolling TextView would center the label in its virtual layout.
+                key.setHorizontallyScrolling(false);
                 key.setTextSize(13);
                 key.setMinWidth(dp(c, 48));
                 key.setMinHeight(dp(c, 48));

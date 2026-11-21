@@ -36,6 +36,9 @@ public class ProviderChoiceMotionTest {
         AtomicInteger writes = new AtomicInteger();
         BottomSheetDialog picker = PixelChoiceSheet.show(activity, "选择 API 接口",
                 Arrays.asList("Claude API Key", "DeepSeek"), 1, index -> writes.incrementAndGet(), null);
+        // The library owns the sheet's exit animation; this assertion exercises dismissal
+        // without depending on ViewDragHelper's frame clock under the API 28 shadows.
+        picker.setDismissWithAnimation(false);
         picker.cancel();
         settle();
         assertFalse(picker.isShowing());
