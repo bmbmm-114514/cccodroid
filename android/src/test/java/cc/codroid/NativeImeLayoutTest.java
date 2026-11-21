@@ -38,6 +38,7 @@ public class NativeImeLayoutTest {
     }
 
     private static <T extends View> T find(View root, Class<T> type) {
+        if (root.getVisibility() != View.VISIBLE) return null;
         if (type.isInstance(root)) return type.cast(root);
         if (root instanceof ViewGroup) {
             ViewGroup parent = (ViewGroup) root;
@@ -72,6 +73,7 @@ public class NativeImeLayoutTest {
             layout(h.root, 412, 860);
             EditText editor = find(h.body, EditText.class);
             View nav = find(h.root, BottomNavigationView.class);
+            assertEquals("输入消息", editor.getHint());
             editor.setText("保留输入中的草稿");
             editor.setSelection(3);
             editor.requestFocus();
@@ -149,21 +151,35 @@ public class NativeImeLayoutTest {
     @Test @Config(sdk = 28)
     public void legacyResizeInsetsAreAppliedOnlyOnceAboveTheKeyboard() {
         Activity host = Robolectric.buildActivity(Activity.class).setup().get();
+        WindowInsets[] delivered = {legacyFrame(0)};
+        // Keep the test window's insets authoritative across AndroidX's redispatch.
+        android.widget.FrameLayout source = new android.widget.FrameLayout(host) {
+            @Override public WindowInsets dispatchApplyWindowInsets(WindowInsets ignored) {
+                if (getChildCount() > 0) getChildAt(0).dispatchApplyWindowInsets(delivered[0]);
+                return delivered[0];
+            }
+        };
         LinearLayout root = new LinearLayout(host);
-        host.setContentView(root);
+        source.addView(root);
+        host.setContentView(source);
         NativeImeLayout keyboard = new NativeImeLayout(root, () -> {});
         keyboard.attach(host.getWindow());
         try {
-            androidx.core.graphics.Insets safe = androidx.core.graphics.Insets.of(0, 24, 0, 24);
-            androidx.core.view.WindowInsetsCompat resized = new androidx.core.view.WindowInsetsCompat.Builder()
-                    .setStableInsets(safe)
-                    .setSystemWindowInsets(androidx.core.graphics.Insets.of(0, 24, 0, 280)).build();
-            root.dispatchApplyWindowInsets(resized.toWindowInsets());
-            root.getViewTreeObserver().dispatchOnPreDraw();
-            Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
-            assertEquals(280, root.getPaddingBottom());
-            assertTrue(keyboard.isVisible());
+            for (int bottom : new int[]{0, 280, 0}) {
+                delivered[0] = legacyFrame(bottom);
+                source.dispatchApplyWindowInsets(delivered[0]);
+                root.getViewTreeObserver().dispatchOnPreDraw();
+                Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
+                assertEquals(bottom, root.getPaddingBottom());
+                assertEquals(bottom > 0, keyboard.isVisible());
+            }
         } finally { keyboard.detach(); }
+    }
+
+    private static WindowInsets legacyFrame(int bottom) {
+        return new androidx.core.view.WindowInsetsCompat.Builder()
+                .setSystemWindowInsets(androidx.core.graphics.Insets.of(0, 24, 0, bottom))
+                .build().toWindowInsets();
     }
 
     @Test @Config(sdk = 28, qualifiers = "w740dp-h420dp-land-mdpi")
@@ -174,6 +190,7 @@ public class NativeImeLayoutTest {
             View rail = find(h.root, NavigationRailView.class);
             assertNotNull(rail);
             EditText editor = find(h.body, EditText.class);
+            assertEquals("输入消息", editor.getHint());
             editor.setText("横屏");
             editor.requestFocus();
             layout(h.root, 740, 230);

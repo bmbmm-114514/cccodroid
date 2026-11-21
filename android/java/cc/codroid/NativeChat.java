@@ -22,17 +22,13 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.json.JSONArray;
@@ -40,9 +36,9 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.UUID;
 
 public class NativeChat {
@@ -58,7 +54,6 @@ public class NativeChat {
 
     private JSONObject lastState = null;
     private String lastTurnsStamp = "";
-    private String providersStamp = "";
     String bookmarkTurn;
 
     // Chat UI elements
@@ -71,15 +66,7 @@ public class NativeChat {
     private LinearLayout approvalsContainer;
 
     // Handoff controls
-    private LinearLayout handoffSection;
-    private TextView handoffTransferLabel;
-    private Spinner handoffModeSpinner;
-    private LinearLayout thirdPartyRow;
-    private Spinner handoffProviderSpinner;
-    private EditText handoffModelEdit;
-    private LinearLayout handoffManualLayout;
-    private LinearLayout handoffChecksContainer;
-    private final Set<String> selectedTurnIds = new HashSet<>();
+    private NativeHandoffPanel handoff;
 
     // Composer controls
     private EditText inputField;
@@ -87,7 +74,6 @@ public class NativeChat {
     private ProgressBar sendProgress;
 
     // Cached lists from multi/state
-    private final List<JSONObject> cachedProviders = new ArrayList<>();
     private final List<JSONObject> cachedProjects = new ArrayList<>();
     private final List<JSONObject> currentTurns = new ArrayList<>();
 
@@ -111,8 +97,6 @@ public class NativeChat {
         lastTurnsStamp = "";
         lastState = null;
         isBusy = false;
-        selectedTurnIds.clear();
-        providersStamp = "";
         renderChatScreen();
         updateComposerButtons();
         loadDraft();
@@ -120,6 +104,7 @@ public class NativeChat {
     }
 
     void leave() {
+        if (handoff != null) handoff.dispose();
         handler.removeCallbacks(pollRunnable);
         isSending = false;
         activeGeneration = -1;
@@ -223,7 +208,7 @@ public class NativeChat {
         dock.setOrientation(LinearLayout.VERTICAL);
         dock.setPadding(h.dp(12), h.dp(4), h.dp(12), h.dp(8));
         h.body.addView(dock, new LinearLayout.LayoutParams(-1, -2));
-        buildHandoffSection(dock);
+        handoff = new NativeHandoffPanel(dock, this::multiName);
         LinearLayout composer = new LinearLayout(h.a);
         composer.setGravity(Gravity.BOTTOM);
         composer.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 28));
@@ -328,96 +313,6 @@ public class NativeChat {
         return b;
     }
 
-    private void buildHandoffSection(LinearLayout parent) {
-        handoffSection = new LinearLayout(h.a);
-        handoffSection.setOrientation(LinearLayout.VERTICAL);
-        handoffSection.setVisibility(View.GONE);
-        handoffSection.setPadding(h.dp(12), h.dp(8), h.dp(12), h.dp(12));
-        handoffSection.setBackground(PixelUi.shape(h.a,"surfaceContainer",20));
-        parent.addView(handoffSection, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout modeRow = new LinearLayout(h.a);
-        modeRow.setOrientation(LinearLayout.HORIZONTAL);
-        modeRow.setGravity(Gravity.CENTER_VERTICAL);
-        handoffSection.addView(modeRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        handoffTransferLabel = new TextView(h.a);
-        handoffTransferLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        handoffTransferLabel.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
-        modeRow.addView(handoffTransferLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        handoffModeSpinner = new Spinner(h.a);
-        ArrayAdapter<String> modeAdapter = new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item,
-                new String[]{"自动交接", "手动选择", "第三方接口"});
-        handoffModeSpinner.setAdapter(modeAdapter);
-        handoffModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parentView, View view, int position, long id) {
-                updateHandoffSubControls(position);
-            }
-            @Override public void onNothingSelected(AdapterView<?> parentView) {}
-        });
-        modeRow.addView(handoffModeSpinner, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        // Third party row
-        thirdPartyRow = new LinearLayout(h.a);
-        thirdPartyRow.setOrientation(LinearLayout.HORIZONTAL);
-        thirdPartyRow.setGravity(Gravity.CENTER_VERTICAL);
-        thirdPartyRow.setVisibility(View.GONE);
-        thirdPartyRow.setPadding(0, h.dp(4), 0, 0);
-        handoffSection.addView(thirdPartyRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        handoffProviderSpinner = new Spinner(h.a);
-        thirdPartyRow.addView(handoffProviderSpinner, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        handoffModelEdit = new EditText(h.a);
-        handoffModelEdit.setHint("模型名称");
-        handoffModelEdit.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        handoffModelEdit.setSingleLine(true);
-        handoffModelEdit.setBackground(makeInputDrawable());
-        handoffModelEdit.setPadding(h.dp(8), h.dp(4), h.dp(8), h.dp(4));
-        thirdPartyRow.addView(handoffModelEdit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-        handoffProviderSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (position >= 0 && position < cachedProviders.size()) {
-                    String defModel = cachedProviders.get(position).optString("model", "");
-                    handoffModelEdit.setText(defModel);
-                }
-            }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-
-        // Manual turns select row
-        handoffManualLayout = new LinearLayout(h.a);
-        handoffManualLayout.setOrientation(LinearLayout.VERTICAL);
-        handoffManualLayout.setVisibility(View.GONE);
-        handoffManualLayout.setPadding(0, h.dp(4), 0, 0);
-        handoffSection.addView(handoffManualLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView manualNotice = new TextView(h.a);
-        manualNotice.setText("勾选需要传递给新 Agent 的上下文回合：");
-        manualNotice.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        manualNotice.setTextColor(PixelUi.color(h.a,"onSurfaceVariant"));
-        handoffManualLayout.addView(manualNotice);
-
-        handoffChecksContainer = new LinearLayout(h.a);
-        handoffChecksContainer.setOrientation(LinearLayout.VERTICAL);
-        ScrollView checkScroll = new ScrollView(h.a);
-        checkScroll.addView(handoffChecksContainer);
-        handoffManualLayout.addView(checkScroll, new LinearLayout.LayoutParams(-1, h.dp(110)));
-    }
-
-    private void updateHandoffSubControls(int position) {
-        if (thirdPartyRow != null) {
-            thirdPartyRow.setVisibility(position == 2 ? View.VISIBLE : View.GONE);
-        }
-        if (handoffManualLayout != null) {
-            handoffManualLayout.setVisibility(position == 1 ? View.VISIBLE : View.GONE);
-        }
-    }
-
     // ==========================================
     // Network Refresh & State Sync
     // ==========================================
@@ -445,25 +340,7 @@ public class NativeChat {
         }
         lastState = d;
 
-        // Parse Providers
-        JSONArray providersArr = d.optJSONArray("providers");
-        cachedProviders.clear();
-        List<String> providerLabels = new ArrayList<>();
-        if (providersArr != null) {
-            for (int i = 0; i < providersArr.length(); i++) {
-                JSONObject p = providersArr.optJSONObject(i);
-                if (p != null) {
-                    cachedProviders.add(p);
-                    providerLabels.add(p.optString("label", p.optString("id")));
-                }
-            }
-        }
-        String version = providersArr == null ? "[]" : providersArr.toString();
-        if (handoffProviderSpinner != null && !providersStamp.equals(version)) {
-            providersStamp = version;
-            ArrayAdapter<String> pAdapter = new ArrayAdapter<>(h.a, android.R.layout.simple_spinner_dropdown_item, providerLabels);
-            handoffProviderSpinner.setAdapter(pAdapter);
-        }
+        handoff.providers(d.optJSONArray("providers"));
 
         // Parse Projects
         JSONArray projsArr = d.optJSONArray("projects");
@@ -541,7 +418,7 @@ public class NativeChat {
                 }
             }
             if (run == null && (turns == null || turns.length() == 0)) renderEmptyConversation();
-            updateManualHandoffCheckboxes();
+            handoff.turns(currentTurns);
         }
 
         // Approvals
@@ -790,7 +667,7 @@ public class NativeChat {
     }
 
     private void paintHandoffControls(JSONObject c) {
-        if (handoffSection == null) return;
+        if (handoff == null) return;
         String source = c != null && !c.isNull("activeAgent") ? c.optString("activeAgent") : "";
         // Check target agent from preferences
         h.get("/api/multi/preferences", pref -> {
@@ -803,43 +680,8 @@ public class NativeChat {
                 h.headerModel(selectedModel, h::quickModel);
             }
             checkQuotaReminder(lastState.optJSONObject("quota"), source, target);
-            boolean switching = !source.isEmpty() && !isBusy && !source.equals(target);
-
-            if (switching) {
-                handoffSection.setVisibility(View.VISIBLE);
-                handoffTransferLabel.setText("交接: " + multiName(source) + " → " + multiName(target));
-                if ("agy".equals(source) && handoffModeSpinner != null) {
-                    handoffModeSpinner.setSelection(1); // manual only for agy
-                    handoffModeSpinner.setEnabled(false);
-                } else if (handoffModeSpinner != null) {
-                    handoffModeSpinner.setEnabled(true);
-                }
-            } else {
-                handoffSection.setVisibility(View.GONE);
-            }
+            handoff.route(source, target, isBusy);
         });
-    }
-
-    private void updateManualHandoffCheckboxes() {
-        if (handoffChecksContainer == null) return;
-        handoffChecksContainer.removeAllViews();
-
-        for (JSONObject turn : currentTurns) {
-            final String tid = turn.optString("id");
-            String summary = turn.optString("user", "");
-            if (summary.length() > 60) summary = summary.substring(0, 60) + "…";
-            String label = multiName(turn.optString("agent")) + " · " + summary;
-
-            CheckBox cb = new CheckBox(h.a);
-            cb.setText(label);
-            cb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            cb.setChecked(selectedTurnIds.contains(tid));
-            cb.setOnCheckedChangeListener((btn, isChecked) -> {
-                if (isChecked) selectedTurnIds.add(tid);
-                else selectedTurnIds.remove(tid);
-            });
-            handoffChecksContainer.addView(cb);
-        }
     }
 
     private void updateComposerButtons() {
@@ -950,29 +792,18 @@ public class NativeChat {
                     ? lastState.optJSONObject("conversation").optString("activeAgent") : "";
             boolean switching = !source.isEmpty() && !source.equals(agent);
 
-            String mode = "manual";
-            if (switching && handoffModeSpinner != null) {
-                int pos = handoffModeSpinner.getSelectedItemPosition();
-                if (pos == 0) mode = "outgoing";
-                else if (pos == 1) mode = "manual";
-                else if (pos == 2) mode = "third-party";
-            }
+            String mode = switching ? handoff.mode(source) : "manual";
             body.put("mode", mode);
-
-            JSONArray selArray = new JSONArray();
-            if ("manual".equals(mode)) {
-                for (String tid : selectedTurnIds) {
-                    selArray.put(tid);
-                }
-            }
-            body.put("selected", selArray);
-
+            body.put("selected", "manual".equals(mode) ? handoff.selected() : new JSONArray());
             if ("third-party".equals(mode)) {
-                int pPos = handoffProviderSpinner != null ? handoffProviderSpinner.getSelectedItemPosition() : -1;
-                String tpProv = pPos >= 0 && pPos < cachedProviders.size() ? cachedProviders.get(pPos).optString("id") : "";
-                String tpMod = handoffModelEdit != null ? handoffModelEdit.getText().toString().trim() : "";
-                body.put("provider", tpProv);
-                body.put("model", tpMod);
+                if (handoff.provider().isEmpty()) {
+                    isSending = false;
+                    updateComposerButtons();
+                    h.notice("请选择交接模型接口");
+                    return;
+                }
+                body.put("provider", handoff.provider());
+                body.put("model", handoff.model());
             }
         } catch (Exception ignored) {}
 
@@ -992,7 +823,7 @@ public class NativeChat {
             if (screen != h.generation) return;
             isSending = false;
             if (inputField != null && text.equals(inputField.getText().toString().trim())) inputField.setText("");
-            selectedTurnIds.clear();
+            handoff.clearSelected();
             refreshChat();
         }, errMsg -> {
             if (screen != h.generation) return;
@@ -1248,9 +1079,7 @@ public class NativeChat {
         return PixelUi.shape(h.a,"surfaceContainerLow",16);
     }
 
-    private GradientDrawable makeInputDrawable() {
-        return PixelUi.shape(h.a,"surfaceContainerHigh",12);
-    }
+
 
     private View createCollapsible(String title, View content) {
         LinearLayout box = new LinearLayout(h.a);
