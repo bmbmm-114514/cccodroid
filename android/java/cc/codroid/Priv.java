@@ -33,7 +33,7 @@ import rikka.shizuku.Shizuku;
  *     → 本类（核对对端 uid 必须是本应用自己）→ Shizuku.newProcess → shell 身份执行
  *
  * 安全：每个连接先查 SO_PEERCRED —— 不是本应用 uid 的一律断开，别的应用借不到这份权限。
- * 反过来客户端也得确认连的是真服务：以前用抽象套接字 "cc.codroid.priv"，名字全机共享，别的应用抢先绑上就能
+ * 反过来客户端也得确认连的是真服务：以前用抽象套接字 "cc.agentui.priv"，名字全机共享，别的应用抢先绑上就能
  * 收走命令、伪造回应（审查 H2）。文件套接字放在私有目录里，别的应用连路径都进不去，抢不走。
  * 抽象套接字已经关掉（审查 10-29 M2）：客户端 priv.mjs 在 files/app/bin，每次启动按内容哈希从 APK 刷新，不会留旧版。
  *
@@ -238,15 +238,15 @@ final class Priv {
             String pkg = ctx.getPackageName();
             // 带点击动作的通知有的 ROM 不让 shell 发（红魔：getIntentSender 权限不足），失败就发纯文字的
             String note = "cmd notification post -t \"" + shq(Tr.f("cccodroid 已更新到 v{0}（系统不让它在后台自己启动）", version)) + "\"";
-            String notify = "{ " + note + " -c \"activity -n " + pkg + "/.MainActivity\" cccodroid-updated \"" + shq(Tr.t("点此打开即可继续使用")) + "\""
+            String notify = "{ " + note + " -c \"activity -n " + pkg + "/cc.codroid.MainActivity\" cccodroid-updated \"" + shq(Tr.t("点此打开即可继续使用")) + "\""
                 + " || " + note + " cccodroid-updated \"" + shq(Tr.t("打开 cccodroid 即可继续使用")) + "\"; } >> " + STAGE_LOG + " 2>&1";
             // 拉界面：am start 回「Starting」不等于界面真出来了 —— 刚装完系统还在做安装后扫描（ColorOS 等），
             // 这时的启动会被悄悄丢掉（10-22 用户手机 0.3.11→0.3.12：日志全成功，界面没回来）。
             // 所以先等两秒，起完看本应用有没有在前台，没有就再拉，三次都不行发通知
             String up = "dumpsys activity activities | grep -qE \"ResumedActivity.*" + pkg + "/\"";
             String job = "if [ \"$(sha256sum " + STAGE + " | cut -d\" \" -f1)\" = " + sha + " ]; then pm install -r " + STAGE + " > " + STAGE_LOG + " 2>&1; else echo \"Error: 安装包被换过\" > " + STAGE_LOG + "; fi; rm -f " + STAGE + "; sleep 2; "
-                + "am start-foreground-service -n " + pkg + "/.GatewayService >> " + STAGE_LOG + " 2>&1"
-                + (reopenUi ? "; ok=; for i in 1 2 3; do am start -W -n " + pkg + "/.MainActivity >> " + STAGE_LOG + " 2>&1; sleep 3; "
+                + "am start-foreground-service -n " + pkg + "/cc.codroid.GatewayService >> " + STAGE_LOG + " 2>&1"
+                + (reopenUi ? "; ok=; for i in 1 2 3; do am start -W -n " + pkg + "/cc.codroid.MainActivity >> " + STAGE_LOG + " 2>&1; sleep 3; "
                      + "if " + up + "; then ok=1; break; fi; echo \"界面没起来（第 $i 次）\" >> " + STAGE_LOG + "; done; [ -n \"$ok\" ] || " + notify
                    : "; grep -q Error " + STAGE_LOG + " && " + notify);
             run("rm -f " + STAGE_LOG);       // 上一次的结果别被当成这一次的

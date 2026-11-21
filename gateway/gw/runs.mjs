@@ -58,8 +58,20 @@ function syncFlag() {
   flagTimer = setTimeout(guarded("同步 .run-active", syncFlag), ms);
 }
 
+let classicBusy = false;
+const multiActivities = new Set();
+export const multiBusy = () => multiActivities.size > 0;
+export function holdMultiActivity() {
+  const key = Symbol();
+  multiActivities.add(key);
+  runFlag(classicBusy);
+  return () => {
+    if (multiActivities.delete(key)) runFlag(classicBusy);
+  };
+}
 export const runFlag = (on) => {
-  on = !!on;
+  classicBusy = !!on;
+  on = classicBusy || multiBusy();
   if (on === wantOn && flagTimer) return;   // 同一状态的重试已经排着，别每次调用都立刻重来
   wantOn = on;
   if (flagOn === wantOn && !flagTimer) return;

@@ -91,7 +91,7 @@
     for (const v of p.claude || []) pr.push(row("Claude Code " + v.version + (v.current ? " · " + t("正在用") : ""), sz(v.bytes)));
     for (const x of p.pkgs || []) pr.push(row(t("pkg 装的 {name}", { name: x.name + " " + x.version }), sz(x.bytes) + ` · <code>pkg uninstall ${esc(x.name)}</code>`));
     if (p.workspace != null) pr.push(row(t("工作区"), sz(p.workspace)));
-    if (p.shared != null) pr.push(row(t("共享目录 /sdcard/cccodroid"), sz(p.shared)));
+    if (p.shared != null) pr.push(row(t("共享目录 /sdcard/ccagentui"), sz(p.shared)));
     for (const x of p.home || []) pr.push(row(x.path, sz(x.bytes)));
     out.push(card(t("程序和你的文件"), esc(t("只显示大小，这里不删")), `<div class="list compact">${pr.join("")}</div>`));
     // 6 已有的清理入口

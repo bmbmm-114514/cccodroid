@@ -3727,3 +3727,27 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 /* RTL：命令参数 / 路径按 LTR 排；标题用 start */
 .ts-head,.bubble .hook-ctx{text-align:start}
 html[dir="rtl"] :is(.tool-arg,.perm-path,.missing-img){direction:ltr;text-align:left;unicode-bidi:isolate}
+
+/* Multi-agent conversations reuse the workbench's page navigation and theme. */
+html.pg-multi #page-body{overflow:hidden;padding:8px 12px max(6px,var(--safe-b))}
+#tab-multi{display:flex;flex-direction:column;height:100%;gap:7px}
+#tab-multi .ma-header,#tab-multi .ma-controls,#tab-multi .ma-compose,#tab-multi .ma-field,#tab-multi .ma-header>label{display:flex;align-items:center;gap:7px}
+#tab-multi .ma-header>label,#tab-multi .ma-grow,#tab-multi textarea{flex:1;min-width:0}
+#tab-multi label>span,#tab-multi small{font-size:12px;color:var(--fg2)}
+#tab-multi select,#tab-multi input:not([type=checkbox]),#tab-multi textarea{max-width:100%;min-width:0;font:inherit;font-size:14px;color:var(--fg);background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:7px}
+#ma-conversations{width:100%} #ma-project-name:empty,#ma-approvals:empty{display:none}
+#tab-multi .ma-panel,#ma-approvals:not(:empty){background:var(--bg2);padding:8px 10px;border-radius:9px;border:1px solid var(--line);max-height:27vh;overflow:auto}
+#ma-accounts>div+div,#ma-third>.ma-field+.ma-field{margin-top:5px}
+#ma-history{flex:1;min-height:72px;overflow:auto;overscroll-behavior:contain;border-block:1px solid var(--line);padding:10px 0}
+#ma-turns article,#ma-live:not(:empty){padding:6px 0 12px}
+#tab-multi .ma-author{font-weight:600;font-size:12px;color:var(--fg2);margin:4px 0}
+#tab-multi .ma-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.55}
+#tab-multi .ma-user{background:var(--user-bg);border-radius:10px;padding:8px 12px;margin-bottom:10px}
+#tab-multi .ma-error,#tab-multi .ma-warning{color:var(--err);font-size:13px;overflow:auto;max-height:20vh}
+#tab-multi .ma-warning{color:var(--warn)}
+#ma-checks label{display:flex;gap:8px;align-items:baseline;padding:4px 0}
+#ma-checks label span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ma-form{display:flex;flex-direction:column;gap:6px;max-height:58%;overflow:auto}
+#ma-form .ma-controls{flex-wrap:wrap}
+#ma-input{resize:vertical;max-height:16vh}
+#ma-approvals button{margin-inline-start:5px}

@@ -52,7 +52,7 @@ GPU 驱动装了：-ngl 99（全部层放 GPU）；没装：-dev none。想强�
 
 ## 怎么测（不用开界面）
 
-模型目录：`/sdcard/cccodroid/models/`（扩展页 llama-cpp 组件下能一键下载 26 个常见模型，也能贴 .gguf 直链）。先在设置页发一条消息让网关拉起服务（或自己另起一个端口），然后：（网关起的服务要密钥，在 `~/.cache/llama-api-key`；自己另起的没加 `--api-key` 就随便填）
+模型目录：`/sdcard/ccagentui/models/`（扩展页 llama-cpp 组件下能一键下载 26 个常见模型，也能贴 .gguf 直链）。先在设置页发一条消息让网关拉起服务（或自己另起一个端口），然后：（网关起的服务要密钥，在 `~/.cache/llama-api-key`；自己另起的没加 `--api-key` 就随便填）
 
 ```sh
 cd 某个测试目录

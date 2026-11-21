@@ -148,6 +148,49 @@
       <div class="tiny sess-tip" data-i18n>选择、导入、回收站、刷新、断开在标题旁的 ⋯ 里；单个会话点右边的 ⋯ 或长按。</div>
     </section>
 
+    <section id="tab-multi" class="tab-pane hidden">
+      <div class="ma-header">
+        <label class="ma-grow"><span data-i18n>对话</span><select id="ma-conversations" data-native></select></label>
+        <button class="btn ghost sm" id="ma-new" data-i18n>新对话</button>
+        <button class="btn ghost sm" id="ma-accounts-btn" aria-expanded="false" aria-controls="ma-accounts" data-i18n>Agent 账户</button>
+      </div>
+      <div id="ma-accounts" class="ma-panel hidden">
+        <div><strong>Claude Code</strong> <span id="ma-claude-account"></span> <button class="btn ghost sm" id="ma-claude-settings" data-i18n>登录 Claude 账户</button></div>
+        <div><strong>Codex</strong> <span id="ma-codex-account"></span> <button class="btn ghost sm" id="ma-install" data-i18n>安装</button> <button class="btn ghost sm" id="ma-login" data-i18n>登录账户</button></div>
+        <div id="ma-device" class="hidden"><code id="ma-code"></code> <button class="btn ghost sm" id="ma-copy" data-i18n>复制</button> <button class="btn sm" id="ma-verify" data-i18n>打开授权页</button></div>
+        <div id="ma-codex-error" class="ma-error hidden"></div>
+        <div><strong>Antigravity</strong> <span id="ma-agy-account"></span> <button class="btn ghost sm" id="ma-agy-install" data-i18n>安装</button> <button class="btn ghost sm" id="ma-agy-login" data-i18n>登录账户</button></div>
+        <div id="ma-agy-flow" class="hidden"><span id="ma-agy-note"></span> <code id="ma-agy-device-code"></code>
+          <button class="btn ghost sm" id="ma-agy-verify" data-i18n>打开授权页</button>
+          <label id="ma-agy-code-row"><span data-i18n>授权码</span> <input id="ma-agy-code" type="password" autocomplete="off"> <button class="btn sm" id="ma-agy-confirm" data-i18n>确定</button></label></div>
+        <div id="ma-agy-error" class="ma-error hidden"></div>
+      </div>
+      <label id="ma-project-row" class="ma-field"><span data-i18n>项目</span><select id="ma-project" data-native></select></label>
+      <div id="ma-project-name" class="tiny"></div>
+      <div id="ma-warning" class="ma-warning hidden" role="status"><span></span> <button class="btn ghost sm" id="ma-dismiss" data-i18n>知道了</button></div>
+      <div id="ma-error" class="ma-error hidden" role="alert"><span></span> <button class="btn ghost sm" id="ma-retry" data-i18n>刷新</button></div>
+      <div id="ma-history" aria-label="对话" data-i18n-attr="aria-label"><div id="ma-turns"></div><div id="ma-live"></div></div>
+      <div id="ma-approvals"></div>
+      <form id="ma-form">
+        <div class="ma-controls">
+          <label class="ma-field"><span>Agent</span><select id="ma-agent" data-native><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="agy">Antigravity</option></select></label>
+          <label id="ma-mode-row" class="ma-field hidden"><span data-i18n>交接方式</span><select id="ma-mode" data-native>
+            <option value="outgoing" data-i18n>原 Agent 整理</option><option value="third-party" data-i18n>第三方模型整理</option><option value="manual" data-i18n>手动选择</option>
+          </select></label>
+        </div>
+        <div id="ma-third" class="ma-panel hidden">
+          <label class="ma-field"><span data-i18n>接口</span><select id="ma-provider" data-native></select></label>
+          <label class="ma-field"><span data-i18n>模型</span><input id="ma-model" autocomplete="off" spellcheck="false"></label>
+          <small data-i18n>所选接口将接收原会话可恢复的历史。</small>
+        </div>
+        <details id="ma-manual" class="ma-panel hidden"><summary data-i18n>选择要附带的回合</summary><div id="ma-checks"></div></details>
+        <div class="ma-compose"><textarea id="ma-input" rows="2" aria-label="消息输入框" data-i18n-attr="aria-label"></textarea>
+          <button type="submit" class="btn" id="ma-send" data-i18n>发送</button>
+          <button type="button" class="btn ghost hidden" id="ma-stop" data-i18n>停止</button>
+        </div>
+      </form>
+    </section>
+
     <!-- 用量：本应用的使用统计 + 耗电（原来在设置里） -->
     <!-- 项目 / 定时任务（照稿）：内容全由 app.js 画，列表与详情同一页，返回键先回列表 -->
     <section id="tab-projects" class="tab-pane hidden"></section>

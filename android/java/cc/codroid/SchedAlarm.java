@@ -21,7 +21,7 @@ import java.nio.file.Files;
  */
 public class SchedAlarm extends BroadcastReceiver {
     static final String TAG = "cccodroid";
-    static final String ACTION = "cc.codroid.SCHED_ALARM";
+    static final String ACTION = "cc.agentui.SCHED_ALARM";
     /** 这次闹钟按哪个计划时刻设的：响的时候交给网关，Doze 推迟几分钟也按「到点」执行（0.6.9 审计 13-04） */
     static final String EXTRA_AT = "at";
     private static long lastAt = -1;

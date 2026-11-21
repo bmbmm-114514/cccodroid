@@ -1126,7 +1126,7 @@
 1126	Piensa primero
 1127	Orientado a código
 1128	Grande
-1129	Los modelos se guardan en /sdcard/cccodroid/models; úsalos en Ajustes → Servicio de modelos → Modelo en el dispositivo. Memoria del dispositivo: {ram} GB. Todos en cuantización Q4_K_M; en un móvil lo práctico es 1–4B, por encima de 6B va muy lento.
+1129	Los modelos se guardan en /sdcard/ccagentui/models; úsalos en Ajustes → Servicio de modelos → Modelo en el dispositivo. Memoria del dispositivo: {ram} GB. Todos en cuantización Q4_K_M; en un móvil lo práctico es 1–4B, por encima de 6B va muy lento.
 1130	{n} descargado(s)
 1131	¿No está en la lista? Pega el enlace de descarga de un archivo .gguf (HuggingFace, ModelScope, etc.). No se verifica la suma de comprobación, solo la cabecera del archivo.
 1132	{name} tiene unos {p}B parámetros ({size}). Irá muy lento en un móvil y puede que no quepa en memoria. ¿Descargar de todos modos?
@@ -3104,7 +3104,7 @@
 3104	{n} sesiones, {size} en total. Las sesiones nunca se borran solas; elimínalas desde la lista de sesiones y primero irán a la papelera
 3105	Datos de ejecución de los componentes (~/.cccodroid)
 3106	{name} (instalado con pkg)
-3107	Carpeta compartida /sdcard/cccodroid
+3107	Carpeta compartida /sdcard/ccagentui
 3108	Programas y tus archivos
 3109	Solo tamaños; aquí no se borra nada
 3110	Papelera de sesiones
@@ -3240,3 +3240,20 @@
 3240	Instala el componente de herramientas PDF y vuelve a abrirlas.
 3241	Indica una carpeta de salida nueva en una ubicación con permiso de escritura.
 3242	El resultado supera 512 MB. Reduce las páginas o la resolución.
+3250	Chat con varios agentes
+3251	Abrir en el chat con varios agentes
+3252	Cuentas de los agentes
+3253	Modo de traspaso
+3254	Elige el agente saliente
+3255	Elige un modelo externo
+3256	Selección manual
+3257	El proveedor seleccionado recibirá el historial recuperable de la sesión original.
+3258	Seleccionar los turnos que se incluirán
+3259	Abrir la página de autorización
+3260	Desconocido
+3261	Sesión iniciada
+3262	Preparando el traspaso…
+3263	{agent} · {window}: queda un {n}%
+3264	Detalles del traspaso
+3265	Código de autorización
+3266	¿Reemplazar el borrador actual?

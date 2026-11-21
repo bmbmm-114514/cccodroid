@@ -1,5 +1,13 @@
 # cccodroid
 
+## Multi-agent branch
+
+This fork starts at upstream v0.7.14. Open the multi-agent conversation page in the sidebar to use Claude Code, Codex, or Antigravity in one project and conversation. Each client retains its native sign-in and session. Claude and Codex can hand work off from a native session fork using the original provider or a configured third-party model. Manual handoff sends the turns you select. Leaving Antigravity uses manual handoff.
+
+The 0.1.0 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
+
+The upstream documentation and upstream APK links follow below. [Integration notes in Chinese](README.zh-CN.md#多-agent-整合分支)
+
 **English** · [简体中文](README.zh-CN.md) · [Discord](https://discord.gg/jE6KW8kwpe) · [Discussions](https://github.com/greyoak111/cccodroid/discussions) · [Contributing](CONTRIBUTING.md)
 
 **A development launcher that runs Claude Code on Android phones.** No root, no custom ROM, no chroot / proot / VM.

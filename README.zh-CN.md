@@ -1,5 +1,18 @@
 # cccodroid
 
+## 多 Agent 整合分支
+
+本分支从上游 v0.7.14 分出。在侧栏打开「多 Agent 对话」，选择工作项目，并为每轮选择 Claude Code、Codex 或 Antigravity。各客户端使用自己的登录流程。同一对话保存在手机上，各 Agent 在同一目录工作，并分别恢复自己的原生会话。
+
+- Claude 和 Codex 切换时，可以让离开的 Agent 在会话分支里挑选上下文，也可以指定第三方接口替它整理。Claude 分支需要兼容 Anthropic Messages 的接口，Codex 分支需要兼容 OpenAI Responses 的接口。第三方会收到原生会话可恢复的上下文，并按自己的账号计费。
+- 手动模式只附带勾选的回合，留空就只发本轮问题。离开 Antigravity 时使用手动模式。对话过长时，各客户端的历史压缩会影响模型能看到的细节。
+- 收到有效额度数据后，当前 Agent 的适用额度窗口剩余 5% 或更少时会提醒。Antigravity 使用官方 CLI 的内建 `/usage` 命令读取订阅额度，未返回有效百分比时显示未知。
+- 可从旧 Claude 对话的菜单打开多 Agent 模式。原版和独立版安装在同一台手机时各有自己的数据目录，从原版导出、在独立版导入后即可选择旧会话。
+
+测试版 0.1.0 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
+
+下文保留上游 cccodroid 的介绍与原版下载链接。
+
 [English](README.md) · **简体中文** · [QQ 交流群 1062538743](#交流与参与) · [Discord](https://discord.gg/jE6KW8kwpe) · [讨论区](https://github.com/greyoak111/cccodroid/discussions) · [参与开发](CONTRIBUTING.zh-CN.md)
 
 **在安卓手机上运行 Claude Code 的开发启动台。** 不 root、不换系统、不走 chroot / proot / 虚拟机。

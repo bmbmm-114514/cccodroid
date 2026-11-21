@@ -62,6 +62,7 @@ import { customRefresh, routeCustom } from "./gw/custom.mjs";
 import { routeBus } from "./gw/bus.mjs";
 import { recoverRunMark, routeQueue } from "./gw/queue.mjs";
 import { sweepTemps } from "./gw/statefile.mjs";
+import { routeMulti, stopMulti } from "./gw/multi.mjs";
 import { routeLogin } from "./gw/login.mjs";
 import { routeRun } from "./gw/run.mjs";
 import { routeOffice } from "./gw/office.mjs";
@@ -94,7 +95,7 @@ import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr,
 import { startWorkIsland, stopWorkIslandSync } from "./gw/work-island.mjs";
 
 // 各模块的路由函数，按原来分支的先后排；返回 NEXT 表示不归它管
-const ROUTES = [routeClaude, routeFeedback, routeUsage, routeCaps, routeProviders, routeSettings, routeProjects, routeBookmarks, routeFonts, commandRoutes(builtinCommands), routeUi, routeSched, routeSessModel, routeBackfill, routeMerge, routeProfile, routeLineage, routeArchive, routeSessions, routeExtensions, routeModels, routeTerminal, routeComponents, routeModules, routeOrphans, routeStorage, routeCustom, routeGit, routeLocal, routeOffice, routePdfTools, routeArc, routeFiles, routePreview, routeBus, routeQueue, routeDevside, routeLogin, routeRun, routeNotices, routeReconcile];
+const ROUTES = [routeMulti, routeClaude, routeFeedback, routeUsage, routeCaps, routeProviders, routeSettings, routeProjects, routeBookmarks, routeFonts, commandRoutes(builtinCommands), routeUi, routeSched, routeSessModel, routeBackfill, routeMerge, routeProfile, routeLineage, routeArchive, routeSessions, routeExtensions, routeModels, routeTerminal, routeComponents, routeModules, routeOrphans, routeStorage, routeCustom, routeGit, routeLocal, routeOffice, routePdfTools, routeArc, routeFiles, routePreview, routeBus, routeQueue, routeDevside, routeLogin, routeRun, routeNotices, routeReconcile];
 
 // ── 路由 ──────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
@@ -265,6 +266,7 @@ setTimeout(async () => {
 // 正在跑的 claude 一并带走（整个进程组）：以前只收终端，claude 成了孤儿继续写文件、继续计费（0.6.9 审计 P1-3）。
 // 中断记录（run mark）是随时落盘的，重启后照常给「继续」卡
 const shutdown = (sig) => {
+  try { stopMulti(); } catch {}
   for (const r of RUNS.values()) if (r.child && !r.ended) { try { killTree(r.child); } catch {} }
   if (sig === "SIGTERM") for (const t of TERMS.values()) if (t.alive) { try { killTree(t.child); } catch {} }
   try { bridgeProc?.kill(); } catch {}

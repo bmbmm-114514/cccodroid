@@ -1126,7 +1126,7 @@
 1126	Réfléchit d’abord
 1127	Orienté code
 1128	Volumineux
-1129	Les modèles vont dans /sdcard/cccodroid/models ; utilisez-les via Réglages → Service de modèle → Modèle local. Mémoire de l’appareil : {ram} Go. Tous en quantification Q4_K_M ; 1 à 4B est raisonnable sur téléphone, au-delà de 6B c’est très lent.
+1129	Les modèles vont dans /sdcard/ccagentui/models ; utilisez-les via Réglages → Service de modèle → Modèle local. Mémoire de l’appareil : {ram} Go. Tous en quantification Q4_K_M ; 1 à 4B est raisonnable sur téléphone, au-delà de 6B c’est très lent.
 1130	{n} téléchargé(s)
 1131	Absent de la liste ? Collez le lien de téléchargement d’un fichier .gguf (HuggingFace, ModelScope…). Aucune somme de contrôle n’est vérifiée, seulement l’en-tête du fichier.
 1132	{name} compte environ {p}B paramètres ({size}). Ce sera très lent sur un téléphone et la mémoire risque de ne pas suffire. Télécharger quand même ?
@@ -3104,7 +3104,7 @@
 3104	{n} sessions, {size} au total. Les sessions ne sont jamais supprimées automatiquement ; supprimez-les depuis la liste des sessions, elles passent d'abord par la corbeille
 3105	Données d'exécution des composants (~/.cccodroid)
 3106	{name} (installé avec pkg)
-3107	Dossier partagé /sdcard/cccodroid
+3107	Dossier partagé /sdcard/ccagentui
 3108	Programmes et vos fichiers
 3109	Tailles uniquement ; rien n'est supprimé ici
 3110	Corbeille des sessions
@@ -3240,3 +3240,20 @@
 3240	Installez le composant PDF, puis rouvrez la boîte à outils.
 3241	Indiquez un nouveau dossier de sortie dans un emplacement accessible en écriture.
 3242	La sortie dépasse 512 Mo. Réduisez les pages ou la résolution.
+3250	Discussion multi-agent
+3251	Ouvrir dans la discussion multi-agent
+3252	Comptes des agents
+3253	Mode de transfert
+3254	Choix par l’agent sortant
+3255	Choix par un modèle tiers
+3256	Sélection manuelle
+3257	Le fournisseur choisi recevra l’historique récupérable de la session d’origine.
+3258	Choisir les échanges à inclure
+3259	Ouvrir la page d’autorisation
+3260	Inconnu
+3261	Connecté
+3262	Préparation du transfert…
+3263	{agent} · {window} : {n} % restants
+3264	Détails du transfert
+3265	Code d’autorisation
+3266	Remplacer le brouillon actuel ?

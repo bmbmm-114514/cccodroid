@@ -18,8 +18,8 @@ import android.util.Log;
  *   Notify.ACTION_DENY 通知里点「拒绝」（权限确认 / 计划）
  */
 public class Events extends BroadcastReceiver {
-    static final String ACTION_INSTALLED = "cc.codroid.INSTALLED";
-    static final String ACTION_PAIR = "cc.codroid.PAIR";
+    static final String ACTION_INSTALLED = "cc.agentui.INSTALLED";
+    static final String ACTION_PAIR = "cc.agentui.PAIR";
     static final String KEY_CODE = "code";
 
     @Override public void onReceive(Context c, Intent i) {

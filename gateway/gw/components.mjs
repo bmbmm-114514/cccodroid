@@ -1,3 +1,4 @@
+import { relocateAddon } from "./prefix-relocation.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, execFile } from "node:child_process";
@@ -1115,6 +1116,7 @@ async function compRunInstall(id, b, job) {
     if (st.size !== Number(n) || (await sha256File(f, null, st.size)) !== h) throw new Error(tz("组件包里的文件校验不符：{file}", { file: rel }));
     job.done += st.size;
   }
+  await relocateAddon(path.join(tree, "usr"));
   // 下载、校验跨了很久：依赖的工具包模块这期间可能被卸了，搬进去之前再核一次（#134）
   // 剩下的窗口只有「核完到搬完」这几毫秒：模块和组件两个管理器之间没有锁，真要严丝合缝得加一把（DeepSeek 复核 11-04）
   const goneMods = modulesMissingFor(b.baseDeps);

@@ -29,7 +29,7 @@ import org.json.JSONObject;
  * 它带着 TERMUX_USB_FD=<fd> 启动 adb 服务（Termux 版 adb 用 libusb_wrap_sys_device 接管这个 fd）。
  */
 final class Usb {
-    static final String ACTION = "cc.codroid.USB_PERMISSION";
+    static final String ACTION = "cc.agentui.USB_PERMISSION";
 
     private static UsbManager mgr(Context c) { return (UsbManager) c.getSystemService(Context.USB_SERVICE); }
 

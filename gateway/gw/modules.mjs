@@ -1,3 +1,4 @@
+import { relocateAddon } from "./prefix-relocation.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -278,6 +279,7 @@ async function modRunInstall(mj, m, base, job) {
     if (st.size !== e.n || (await sha256File(f, null, st.size)) !== e.h) throw new Error(tz("模块包里的文件校验不符：{file}", { file: e.rel }));
     job.done += st.size;
   }
+  await relocateAddon(path.join(tree, "usr"));
   // 搬进去：.ok 最后写，中途被打断就是「没装」，重装会覆盖、卸载按 FILES 删
   job.phase = "installing";
   fs.rmSync(path.join(dirOf(m), ".ok"), { force: true });

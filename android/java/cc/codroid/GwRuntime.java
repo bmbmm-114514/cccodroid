@@ -117,6 +117,28 @@ final class GwRuntime {
         }
     }
 
+    // Bootstrap a fresh installation from the verified staging tree. Each copy is
+    // pinned AFTER relocation, exactly as on normal gateway startup.
+    void bootstrapNode(File stage, String source) throws Exception {
+        JSONObject pin = pin(ctx);
+        if (pin == null || !env.pkg.equals(pin.optString("target"))) throw new IOException("Missing gateway runtime pin");
+        JSONObject gw = pin.getJSONObject("gw");
+        dir.mkdirs();
+        prune(dir, gw, true);
+        byte[][] swap = { ("/data/data/" + source + "/").getBytes(StandardCharsets.UTF_8),
+                ("/data/data/" + env.pkg + "/").getBytes(StandardCharsets.UTF_8) };
+        if (swap[0].length != swap[1].length) throw new IOException("Incompatible package prefix");
+        for (java.util.Iterator<String> it = gw.keys(); it.hasNext();) {
+            String name = it.next();
+            JSONObject entry = gw.getJSONObject(name);
+            String want = entry.getString("sha256");
+            File dest = new File(dir, name);
+            if (want.equals(shaCached(dest))) continue;
+            File src = new File(stage, entry.getString("src"));
+            put(src, dest, want, swap);
+        }
+    }
+
     /** 删掉目录里钉子以外的东西（top：网关目录，glibc 子目录留着） */
     private static void prune(File d, JSONObject keep, boolean top) {
         File[] fs = d.listFiles();

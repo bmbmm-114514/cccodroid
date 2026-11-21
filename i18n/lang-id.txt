@@ -1126,7 +1126,7 @@
 1126	Berpikir dulu
 1127	Fokus kode
 1128	Besar
-1129	Model disimpan di /sdcard/cccodroid/models; setelah diunduh, gunakan di Pengaturan → Layanan model → Model kecil di perangkat. Memori perangkat ini {ram} GB. Semuanya terkuantisasi Q4_K_M; di ponsel 1–4B cukup praktis, di atas 6B akan sangat lambat.
+1129	Model disimpan di /sdcard/ccagentui/models; setelah diunduh, gunakan di Pengaturan → Layanan model → Model kecil di perangkat. Memori perangkat ini {ram} GB. Semuanya terkuantisasi Q4_K_M; di ponsel 1–4B cukup praktis, di atas 6B akan sangat lambat.
 1130	{n} diunduh
 1131	Tidak ada di daftar? Tempel tautan unduhan file .gguf (HuggingFace, ModelScope, dll.). Hash tidak diverifikasi, hanya header file yang diperiksa.
 1132	{name} sekitar {p}B parameter, {size}. Akan sangat lambat di ponsel dan memorinya mungkin tidak cukup. Tetap unduh?
@@ -3104,7 +3104,7 @@
 3104	{n} sesi, total {size}. Sesi tidak pernah dihapus otomatis; hapus dari daftar sesi, dan sesi masuk ke tempat sampah dulu
 3105	Data runtime komponen (~/.cccodroid)
 3106	{name} (dipasang dengan pkg)
-3107	Folder bersama /sdcard/cccodroid
+3107	Folder bersama /sdcard/ccagentui
 3108	Program dan file Anda
 3109	Hanya ukuran; tidak ada yang dihapus di sini
 3110	Tempat sampah sesi
@@ -3240,3 +3240,20 @@
 3240	Instal komponen kotak alat PDF, lalu buka kembali.
 3241	Masukkan folder hasil baru di lokasi yang dapat ditulis.
 3242	Hasil melebihi 512 MB. Kurangi halaman atau resolusi.
+3250	Obrolan multiagen
+3251	Buka di obrolan multiagen
+3252	Akun agen
+3253	Cara serah terima
+3254	Dipilih agen sebelumnya
+3255	Dipilih model pihak ketiga
+3256	Pilih secara manual
+3257	Penyedia terpilih akan menerima riwayat sesi asli yang dapat dipulihkan.
+3258	Pilih giliran yang disertakan
+3259	Buka halaman otorisasi
+3260	Tidak diketahui
+3261	Sudah masuk
+3262	Menyiapkan serah terima…
+3263	{agent} · {window}: tersisa {n}%
+3264	Rincian serah terima
+3265	Kode otorisasi
+3266	Ganti draf saat ini?

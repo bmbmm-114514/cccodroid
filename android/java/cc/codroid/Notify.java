@@ -32,8 +32,8 @@ import org.json.JSONObject;
 final class Notify {
     static final String TAG = "cccodroid";
     static final String CH_DONE = "done", CH_ASK = "ask";
-    static final String ACTION_DENY = "cc.codroid.PERM_DENY";
-    static final String ACTION_OPEN = "cc.codroid.OPEN_SESSION";
+    static final String ACTION_DENY = "cc.agentui.PERM_DENY";
+    static final String ACTION_OPEN = "cc.agentui.OPEN_SESSION";
     private static final int ID_DONE = 50;           // 完成通知只留最新一条
     private static final String TAG_ASK = "ask";
     private static final String TAG_DONE = "done";     // 确认通知按 tag + 请求号区分

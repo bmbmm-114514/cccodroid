@@ -15,7 +15,7 @@ export const SESSION_A = "synthetic-ui-a";
 export const SESSION_B = "synthetic-ui-b";
 
 /** Serve the checkout's real frontend with in-memory APIs on a new loopback-only port. */
-export async function startManagedUiServer() {
+export async function startManagedUiServer({ handleRequest } = {}) {
   const clients = new Set(), held = new Set();
   let eventId = 0, removal = null;
   const now = Date.now();
@@ -82,6 +82,7 @@ export async function startManagedUiServer() {
       // CSP plus CDP interception keep the browser on this fixture, including images and connect APIs.
       res.setHeader("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'");
       res.setHeader("Referrer-Policy", "no-referrer");
+      if (handleRequest && await handleRequest(req, res, url)) return;
       if (p.startsWith("/api/")) state.requests.push({ method: req.method, path: p, query: url.search });
       if (p === "/api/events" && req.method === "GET") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", "connection": "keep-alive" });

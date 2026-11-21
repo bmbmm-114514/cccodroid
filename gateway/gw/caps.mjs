@@ -4,7 +4,7 @@ import { SETTINGS } from "./settings-store.mjs";
 import { API_KEY, PROVIDER, providerBrief } from "./providers.mjs";
 import { bridgeAlive, runClaude, safeMode } from "./claude.mjs";
 import { AUTH_CACHE } from "./login.mjs";
-import { LAST_SESSION, RUNS } from "./runs.mjs";
+import { LAST_SESSION, RUNS, multiBusy } from "./runs.mjs";
 import { NEXT, sendJson, uiTag } from "./http.mjs";
 import { QUEUE } from "./queue.mjs";
 import { cmdDescs } from "./commands.mjs";
@@ -117,7 +117,7 @@ export async function routeCaps(req, res, u, p) {
       bridge: await bridgeAlive(),
       uptimeMs: Math.round(process.uptime() * 1000),
       version: "3.0.0",
-      busy: RUNS.size > 0,
+      busy: RUNS.size > 0 || multiBusy(),
       running: RUNS.size,
       // 挂起的（点了停止、被系统中断的）不会自己发出去，不算「有活要干」：外壳据 queued 判断能不能换工具包
       queued: QUEUE.filter((q) => !q.held).length,

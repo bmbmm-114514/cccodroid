@@ -43,7 +43,7 @@ else
   AAPT2=${AAPT2:-aapt2}
   AJAR=${ANDROID_JAR:-$B/android.jar}
 fi
-KEY=${KEY:-$B/cccodroid-release.json}
+KEY=${KEY:-$B/cccodroid-multi-agent-release.json}
 SIGN=${SIGN:-apklib}
 A=$ROOT/android
 OUT=$ROOT/dist
@@ -82,6 +82,14 @@ node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 # 原生小库与小程序一律进 APK 的原生库目录（lib/arm64-v8a，名字得是 lib*.so）：安装时系统解到 /data/app/…/lib/arm64，
 # 应用自己的 uid 也改不了，起网关、起 claude 时直接从那里加载，没有「核过之后被换」的窗口（安全 4 第 1 层）。路径由 Env.java 经环境变量交出去
 NL="$A/nativelib"; rm -rf "$NL"; mkdir -p "$NL" "$A/assets/app/lib"     # build/ 下面会被 javac 那步整个清掉，先放这里、打包前拷过去
+if [ -n "${NATIVE_BASE_APK:-}" ]; then
+  # These native sources are unchanged from v0.7.14. Pin both inputs.
+  (cd "$A/native" && sha256sum -c "$A/prebuilt/native-v0.7.14.sha256") || exit 1
+  [ "$(sha256sum "$NATIVE_BASE_APK" | cut -c1-64)" = c1c424fe1416e0a27ceaa41d2bc500b8e4ca09d643aef226f3cb719fccc46ca2 ] || { echo "Wrong native baseline APK"; exit 1; }
+  for so in libccenosys libccenosysrun libccptyhost libccexecshim libccexecshimb libccnodump; do
+    unzip -p "$NATIVE_BASE_APK" "lib/arm64-v8a/$so.so" > "$NL/$so.so" || exit 1
+  done
+else
 # seccomp 拦截 → ENOSYS（不依赖 libc，见源码注释）。Android 14 上没有它 claude 起不来
 $CC_ANDROID -O2 -shared -fPIC -nostdlib -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
   -o "$NL/libccenosys.so" "$A/native/seccomp-enosys.c"
@@ -107,11 +115,16 @@ for f in "$NL"/libcc*.so; do
   [ -n "$(patchelf --print-rpath "$f" 2>/dev/null)" ] || continue
   patchelf --remove-rpath "$f" && [ -z "$(patchelf --print-rpath "$f")" ] || { echo "✗ 去不掉 $(basename "$f") 的 RUNPATH（要 patchelf：C/C++ 构建模块）"; exit 1; }
 done
+fi
 cp "$A/native/execpath.cjs" "$A/assets/app/lib/"
 # 7-Zip（压缩包浏览、解压、压缩）：成品存在仓库里，由 scripts/build-7zz.sh 从上游源码编出；核过哈希再进 APK
 ( cd "$A/prebuilt" && [ "$(sha256sum libcc7zz.so | cut -c1-64)" = "$(cat libcc7zz.so.sha256)" ] ) || { echo "✗ android/prebuilt/libcc7zz.so 和记下的哈希对不上：重跑 sh scripts/build-7zz.sh"; exit 1; }
 cp "$A/prebuilt/libcc7zz.so" "$NL/"
-TAG=$(cat "$A/assets/app/server.mjs" "$A/assets/app/boot.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* "$A/assets/app/TOOLS.md" $(find "$A/assets/app/web" -type f | sort) "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* "$NL/"libcc*.so | md5sum | cut -c1-12)
+TAG=$({
+  cat "$A/assets/app/server.mjs" "$A/assets/app/boot.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* "$A/assets/app/TOOLS.md"
+  find "$A/assets/app/web" -type f -print0 | sort -z | xargs -0 cat
+  cat "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* "$NL/"libcc*.so
+} | md5sum | cut -c1-12)
 echo "$TAG" > "$A/assets/app/TAG"
 echo "  tag $TAG"
 # 逐文件清单（sha256 + 相对路径）：启动时应用按它核对 files/app，被改过、多出来的就从安装包还原（防项目钩子 / MCP 之类偷偷改网关）
@@ -122,18 +135,19 @@ echo "  清单 $(wc -l < "$A/assets/app/FILES") 个文件"
 LIBS=$(ls "$ROOT"/third_party/shizuku/*.jar | tr '\n' ':')
 echo "▸ javac"
 rm -rf "$A/build"; mkdir -p "$A/build/classes"
-$JAVAC -encoding UTF-8 --release 8 -nowarn \
-  -cp "$AJAR:$LIBS" -d "$A/build/classes" $(find "$A/java" -name '*.java')
+(cd "$A/java" && find . -name '*.java' > "$A/build/java-sources" &&
+  $JAVAC -encoding UTF-8 --release 8 -nowarn -cp "$AJAR:$LIBS" -d "$A/build/classes" @"$A/build/java-sources")
 
 echo "▸ d8"
-$D8 --release --min-api 26 \
-  --lib "$AJAR" --output "$A/build" $(find "$A/build/classes" -name '*.class') "$ROOT"/third_party/shizuku/*.jar
+(cd "$A/build/classes" && find . -name '*.class' > "$A/build/dex-inputs" &&
+  $D8 --release --min-api 26 --lib "$AJAR" --output "$A/build" @"$A/build/dex-inputs" "$ROOT"/third_party/shizuku/*.jar)
 
 # 「经加载器」要的 glibc ld.so：targetSdk 36 只能 exec APK 原生库目录里的文件，ld.so 就以 libldlinux.so 进 lib/。
 # 取钉住那一版工具包锁文件里的同一个 glibc 包（核 sha256）—— ld.so 与工具包里的 libc.so.6 必须出自同一次构建。
 # 仓库里 android/prebuilt/glibc 存了一份，和锁文件对得上就不联网
 PIN_BASE=$(node -p 'require(process.argv[1]).base' "$A/assets/devkit-pin.json")
-PIN_TARGET=$(node -p 'require(process.argv[1]).target' "$A/assets/devkit-pin.json")
+PIN_TARGET=$(sed -n 's/.*package="\([^"]*\)".*/\1/p' "$A/AndroidManifest.xml" | head -1)
+[ -n "$PIN_TARGET" ] || exit 1
 LOCK="$ROOT/devkit/cache/lock-$(node -p 'require(process.argv[1]).tag' "$A/assets/devkit-pin.json").json"
 mkdir -p "$ROOT/devkit/cache" "$A/build/lib/arm64-v8a"
 [ -s "$LOCK" ] || curl -fsSL --retry 3 -o "$LOCK" "${PIN_BASE}devkit.lock.json"
@@ -171,25 +185,25 @@ if [ "$SIGN" = apksigner ]; then
   ( cd "$A/build" && zip -q unsigned.apk classes.dex && zip -q -0 unsigned.apk lib/arm64-v8a/libldlinux.so lib/arm64-v8a/libcc*.so )
   ${ZIPALIGN:-zipalign} -p -f 4 "$A/build/unsigned.apk" "$A/build/aligned.apk"
   if [ -n "$KS" ]; then
-    ${APKSIGNER:-apksigner} sign --ks "$KS" --ks-pass "pass:${KS_PASS:-android}" --out "$OUT/cccodroid.apk" "$A/build/aligned.apk"
+    ${APKSIGNER:-apksigner} sign --ks "$KS" --ks-pass "pass:${KS_PASS:-android}" --out "$OUT/cccodroid-multi-agent.apk" "$A/build/aligned.apk"
   else
     # 钥匙 JSON → PKCS#8 DER + 证书，只在构建目录里待一下，签完就删
     trap 'rm -f "$A/build/key.pk8" "$A/build/cert.pem"' EXIT
     node -e 'const fs=require("fs"),c=require("crypto"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
       fs.writeFileSync(process.argv[2],c.createPrivateKey(j.key).export({type:"pkcs8",format:"der"}),{mode:0o600});
       fs.writeFileSync(process.argv[3],j.cert)' "$KEY" "$A/build/key.pk8" "$A/build/cert.pem"
-    ${APKSIGNER:-apksigner} sign --key "$A/build/key.pk8" --cert "$A/build/cert.pem" --out "$OUT/cccodroid.apk" "$A/build/aligned.apk"
+    ${APKSIGNER:-apksigner} sign --key "$A/build/key.pk8" --cert "$A/build/cert.pem" --out "$OUT/cccodroid-multi-agent.apk" "$A/build/aligned.apk"
   fi
-  rm -f "$OUT/cccodroid.apk.idsig"
-  echo "  $(du -h "$OUT/cccodroid.apk" | cut -f1)"
+  rm -f "$OUT/cccodroid-multi-agent.apk.idsig"
+  echo "  $(du -h "$OUT/cccodroid-multi-agent.apk" | cut -f1)"
 else
 node --input-type=module -e "
 import fs from 'node:fs'; import { signApk } from '$ROOT/scripts/apklib.mjs';
-const r = signApk('$A/build/unsigned.apk', '$OUT/cccodroid.apk',
+const r = signApk('$A/build/unsigned.apk', '$OUT/cccodroid-multi-agent.apk',
   [{ name: 'classes.dex', data: fs.readFileSync('$A/build/classes.dex'), method: 8 },
    ...['libldlinux.so', ...fs.readdirSync('$NL').filter((n) => /^libcc.*\.so$/.test(n)).sort()]
      .map((n) => ({ name: 'lib/arm64-v8a/' + n, data: fs.readFileSync('$A/build/lib/arm64-v8a/' + n), method: 0 }))], '$KEY');
 console.log('  ' + r.entries + ' 个条目 · ' + (r.size / 1048576).toFixed(2) + ' MB');
 "
 fi
-echo "✓ $OUT/cccodroid.apk"
+echo "✓ $OUT/cccodroid-multi-agent.apk"

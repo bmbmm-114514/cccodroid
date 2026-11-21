@@ -39,7 +39,8 @@ import org.json.JSONObject;
  */
 final class Updater {
     static final String TAG = "cccodroid-upd";
-    static final String REPO = "greyoak111/cccodroid";
+    static final String REPO = "greyoak111/cccodroid"; // pinned devkit releases
+    static final String APP_REPO = "bmbmm-114514/cccodroid";
     /** 备用源：cccodroid.net 镜像了最近几个版本的 APK 和一份同形状的发布列表（dl/releases.json）。
      *  只在 GitHub 连不上 / 下载不顺时用；下来的 APK 照样核 sha256 和签名。工具包太大，没有镜像 */
     static final String MIRROR = "https://cccodroid.net";
@@ -202,7 +203,7 @@ final class Updater {
         String p = flavorPref();
         return "28".equals(p) || "36".equals(p) ? p : flavor();
     }
-    static String apkName(String flavor) { return "36".equals(flavor) ? "cccodroid-36.apk" : "cccodroid.apk"; }
+    static String apkName(String flavor) { return "36".equals(flavor) ? "cccodroid-multi-agent-36.apk" : "cccodroid-multi-agent.apk"; }
     /** 系统拒装 28 的报错：安卓 14 起有「最低可安装 targetSdk」，以后的版本可能抬过 28 */
     static boolean sdkTooOld(String msg) { return msg != null && msg.contains("DEPRECATED_SDK_VERSION"); }
     /** 装 28 被系统以 targetSdk 太旧拒掉：记下只能 36，改下 36 那套 */
@@ -450,27 +451,12 @@ final class Updater {
     private void check(boolean manual) {
         lastError = "";
         refreshCurrent();
-        String[] ghErr = new String[1];
-        JSONArray[] lists = fetchLists(ghErr);
-        JSONArray rels = lists[0];
-        boolean mirror = false;
-        if (rels == null) {
-            lastError = Tr.t("连不上 GitHub：") + ghErr[0];
-            rels = lists[1];
-            mirror = rels != null;
-            // GitHub 不通：应用本身改看镜像的发布列表；工具包没有镜像，如实说查不了（别报成"已是最新"）
-            if (rels == null) app.set("error", lastError);
-            if (pinnedInstalled()) devkit.set("uptodate", Tr.t("已是本应用配套的版本（GitHub 连不上，暂时查不了更新的）"));
-            else devkit.set("error", lastError);
-        }
-        if (rels != null) {
-            try { checkApp(rels); if (mirror && !"error".equals(app.state)) app.message = app.message.isEmpty() ? Tr.t("来自 cccodroid.net 镜像") : app.message + Tr.t(" · 来自 cccodroid.net 镜像"); }
-            catch (Exception e) { app.set("error", e.getMessage()); }
-            // 首装还没完成（工具包没装好）就别查工具包：那时读不到已装的模块，planModules 会按「整包用户」规划成全部模块，
-            // 自动更新在 Wi‑Fi 下把它们全下好，首装刚按勾选装完，启动流程又把这份「已下载的更新」装上 —— 勾了两个、装了八个（群友 10-24）
-            if (!env.devkitReady()) devkit.set("uptodate", Tr.t("首次安装进行中"));
-            else if (!mirror) try { checkDevkit(rels); } catch (Exception e) { devkit.set("error", e.getMessage()); }
-        }
+        // App updates are published independently of the upstream development kit.
+        try {
+            String url = "https://api.github.com/repos/" + APP_REPO + "/releases?per_page=30";
+            checkApp(new JSONArray(new String(Installer.httpGetSmall(url), StandardCharsets.UTF_8)));
+        } catch (Exception e) { app.set("error", e.getMessage()); }
+        if (!devkitMoving()) devkit.set("uptodate", Tr.t("工具包版本由当前安装包指定"));
         try { checkClaude(); } catch (Exception e) { claude.set("error", Tr.t("连不上 downloads.claude.ai：") + e.getMessage()); }
         prefs().edit().putLong("lastCheck", System.currentTimeMillis()).apply();
         if (auto() && !manual && env.devkitReady()) autoApply();      // 首装期间不自动装任何东西，Claude Code 也由首装流程来装
@@ -540,8 +526,10 @@ final class Updater {
         for (int i = 0; i < rels.length(); i++) {
             JSONObject r = rels.getJSONObject(i);
             String tag = r.optString("tag_name");
-            if (r.optBoolean("draft") || !tag.matches("v\\d+(\\.\\d+)*")) continue;
-            app.latest = tag.substring(1);
+            if (!tag.startsWith("multi-agent-")) continue;
+            String versionTag = tag.substring("multi-agent-".length());
+            if (r.optBoolean("draft") || !versionTag.matches("v\\d+(\\.\\d+)*")) continue;
+            app.latest = versionTag.substring(1);
             String want = wantFlavor(), name = apkName(want);
             // 版本相同但要换一套（28 ↔ 36）：也算有更新，同版本号覆盖安装系统是认的
             int c = cmpVer(app.latest, app.current);
@@ -552,10 +540,9 @@ final class Updater {
                 JSONObject a = as.getJSONObject(k);
                 if (!a.optString("name").equals(name)) continue;
                 app.url = a.getString("browser_download_url");
-                // 三处都是同一份文件，谁先谁后由下载前测速定（Installer.rank），这里只管都列上
-                String gh = "https://github.com/" + REPO + "/releases/download/" + tag + "/" + name;
-                app.alt = app.url.equals(gh) ? MIRROR + "/dl/" + tag + "/" + name : gh;
-                app.alt2 = DL + "/dl/" + tag + "/" + name;
+                String gh = "https://github.com/" + APP_REPO + "/releases/download/" + tag + "/" + name;
+                if (!gh.equals(app.url)) throw new IOException("Unrecognized multi-agent APK source");
+                app.alt = null; app.alt2 = null;
                 app.size = a.optLong("size");
                 String d = a.optString("digest", "");
                 app.sha = d.startsWith("sha256:") ? d.substring(7).toLowerCase(java.util.Locale.ROOT) : null;

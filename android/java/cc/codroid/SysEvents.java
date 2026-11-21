@@ -30,7 +30,7 @@ public class SysEvents extends BroadcastReceiver {
             try {
                 for (int i = 0; i < 16 && !MainActivity.visible; i++) {
                     Thread.sleep(500);
-                    if (i >= 2 && Priv.granted()) { Priv.run("am start -n " + c.getPackageName() + "/.MainActivity"); Thread.sleep(1500); break; }
+                    if (i >= 2 && Priv.granted()) { Priv.run("am start -n " + c.getPackageName() + "/cc.codroid.MainActivity"); Thread.sleep(1500); break; }
                 }
                 if (!MainActivity.visible) Notify.updatedTapToOpen(c);
             } catch (Throwable ignored) {

@@ -518,12 +518,49 @@ final class Installer {
         deleteTree(tmp);
         tmp.mkdirs();
         String got = extractInto(tmp, raw, total, gzip, tarSha);
+        relocateStaged(tmp);
         JSONObject p = new JSONObject();
         try { p.put("base", base == null ? "" : base).put("sha256", sha == null ? "" : sha).put("tarSha256", got); }
         catch (org.json.JSONException ignored) {}
         write(new File(tmp, PENDING), p + "\n");
         swapIn(tmp);
         finish();
+    }
+
+    /** Rebase a verified package before first-run or the atomic swap. The module
+     * source and Node runtime both come from the signed APK's trust chain. */
+    private void relocateStaged(File stage) throws IOException {
+        JSONObject pin = Updater.devkitPin(env.context);
+        if (pin == null) throw new IOException("Missing devkit pin");
+        String source = pin.optString("target");
+        if (env.pkg.equals(source)) return;
+        try {
+            GwRuntime runtime = new GwRuntime(env.context, env);
+            runtime.bootstrapNode(stage, source);
+            String script = AppFiles.assetText(env.context, "app/gw/prefix-relocation.mjs");
+            if (script == null) throw new IOException("Missing prefix relocation module");
+            ProcessBuilder pb = new ProcessBuilder(Env.LINKER, runtime.node().getPath(), "--input-type=module", "-",
+                    stage.getAbsolutePath(), source, env.pkg);
+            pb.directory(stage);
+            pb.redirectErrorStream(true);
+            pb.environment().clear();
+            pb.environment().put("LD_LIBRARY_PATH", runtime.dir.getPath());
+            pb.environment().put("PATH", "/system/bin");
+            Process child = pb.start();
+            try {
+                try (OutputStream in = child.getOutputStream()) {
+                    in.write((script + "\nawait relocatePrefix(...process.argv.slice(2));\n").getBytes(StandardCharsets.UTF_8));
+                }
+                String last = "";
+                try (java.io.BufferedReader out = new java.io.BufferedReader(new java.io.InputStreamReader(child.getInputStream()))) {
+                    for (String line; (line = out.readLine()) != null;) last = line;
+                }
+                if (child.waitFor() != 0) throw new IOException("工具包前缀迁移失败: " + last);
+            } finally { child.destroy(); }
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new IOException("工具包未安装：" + e.getMessage(), e);
+        }
     }
 
     /** 解一个 tar(.gz) 到 dir（叠加，不先清空），边解边算 tar 的 sha256；tarSha 非空时对不上就整个删掉 dir、抛错。返回实得的 sha256 */
@@ -621,6 +658,7 @@ final class Installer {
             extractInto(tmp, new FileInputStream(gz), gz.length(), true, m.optJSONObject("tar").optString("sha256"));
             ids.put(m.optString("id"));
         }
+        relocateStaged(tmp);
         write(new File(tmp, MODULES_JSON), new String(mjBytes, StandardCharsets.UTF_8));
         JSONObject p = new JSONObject();
         try { p.put("base", base).put("sha256", identity == null ? "" : identity).put("modules", ids).put("snapshot", mj.optString("snapshot")); }

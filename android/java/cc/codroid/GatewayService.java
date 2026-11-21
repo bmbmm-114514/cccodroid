@@ -24,10 +24,10 @@ import java.net.URL;
 public class GatewayService extends Service {
     static final String TAG = "cccodroid";
     static final String CH = "gateway";
-    static final String ACTION_STOP = "cc.codroid.STOP";
-    static final String ACTION_BOOT = "cc.codroid.BOOT";
+    static final String ACTION_STOP = "cc.agentui.STOP";
+    static final String ACTION_BOOT = "cc.agentui.BOOT";
     /** 系统闹钟叫醒（SchedAlarm）：跑完到点的任务就自己退，不常驻（0.6.9 审计 13-01） */
-    static final String ACTION_ALARM = "cc.codroid.ALARM";
+    static final String ACTION_ALARM = "cc.agentui.ALARM";
 
     /** 替换工具包期间停住网关（它跑的 node 就在要被换掉的目录里） */
     private static volatile boolean paused;

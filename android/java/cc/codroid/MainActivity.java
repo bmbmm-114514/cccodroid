@@ -41,7 +41,7 @@ import java.util.concurrent.CountDownLatch;
  */
 public class MainActivity extends Activity {
 
-    static final String ACTION_APPLY_DEVKIT = "cc.codroid.APPLY_DEVKIT";
+    static final String ACTION_APPLY_DEVKIT = "cc.agentui.APPLY_DEVKIT";
     // 内部动作的口令：MainActivity 是导出的（启动器、分享要用），别的应用也能发这些 action 让我们去下 650MB 工具包、
     // 重装 APK（审查 v0.5.5 Android-M2）。我们自己发的 Intent / PendingIntent 都带上这个口令，对不上的一律不理。
     // 口令不再明文落盘（0.6.10 审计 200-1-06）：由 Android Keystore 里不可导出的 HMAC 密钥派生，跨进程重启 / 应用更新都不变
@@ -90,15 +90,15 @@ public class MainActivity extends Activity {
         String k = i.getStringExtra(IK);
         return k != null && java.security.MessageDigest.isEqual(k.getBytes(), intentKey(this).getBytes());
     }
-    static final String ACTION_UPDATE = "cc.codroid.UPDATE";
+    static final String ACTION_UPDATE = "cc.agentui.UPDATE";
     /** 设置页「恢复初始设置」：网关只能请求弹框（Priv 的 factory_reset），执行要用户在这里点 */
-    static final String ACTION_FACTORY_RESET = "cc.codroid.FACTORY_RESET";
-    static final String ACTION_SHIZUKU = "cc.codroid.SHIZUKU";
-    static final String ACTION_A11Y_OK = "cc.codroid.A11Y_OK";
-    static final String ACTION_PRIV_OK = "cc.codroid.PRIV_OK";
-    static final String ACTION_CONSENT = "cc.codroid.CONSENT";
+    static final String ACTION_FACTORY_RESET = "cc.agentui.FACTORY_RESET";
+    static final String ACTION_SHIZUKU = "cc.agentui.SHIZUKU";
+    static final String ACTION_A11Y_OK = "cc.agentui.A11Y_OK";
+    static final String ACTION_PRIV_OK = "cc.agentui.PRIV_OK";
+    static final String ACTION_CONSENT = "cc.agentui.CONSENT";
     /** 配对通知的 fullScreenIntent：只为让通知常驻顶部，真被拉起（锁屏时）也什么都不做 */
-    static final String ACTION_SHIZUKU_NOOP = "cc.codroid.SHIZUKU_NOOP";
+    static final String ACTION_SHIZUKU_NOOP = "cc.agentui.SHIZUKU_NOOP";
     /** 主界面（聊天）在前台吗：通知只在用户没盯着聊天时发 */
     static volatile boolean visible;
     /** 本应用有界面在前台吗（主界面或独立浏览器）：静默更新、读剪贴板这类按「用户在不在用本应用」判断（11-04 报告 A4） */
@@ -572,7 +572,7 @@ public class MainActivity extends Activity {
         String a = i == null ? null : i.getAction();
         if (a == null) return;
         if (Intent.ACTION_SEND.equals(a) || Intent.ACTION_SEND_MULTIPLE.equals(a)) { receiveShare(i); return; }
-        if (a.startsWith("cc.codroid.") && !fromUs(i)) { android.util.Log.w("cccodroid", "忽略外来的内部动作 " + a); return; }
+        if (a.startsWith("cc.agentui.") && !fromUs(i)) { android.util.Log.w("cccodroid", "忽略外来的内部动作 " + a); return; }
         if (ACTION_APPLY_DEVKIT.equals(a) || ACTION_UPDATE.equals(a) && "devkit".equals(i.getStringExtra("item"))) applyDevkitUi();
         else if (ACTION_UPDATE.equals(a)) {
             // 通知点进来的安装请求没接住（文件没了、状态对不上）：至少给一句提示，不再静默返回（#123-2）
@@ -1410,7 +1410,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * targetSdk ≥ 30：共享目录 /sdcard/cccodroid（交付 APK、截图、本地工具包）要「所有文件访问」。
+     * targetSdk ≥ 30：共享目录 /sdcard/ccagentui（交付 APK、截图、本地工具包）要「所有文件访问」。
      * 问一次，带去系统设置页（Shizuku 授权了也不代为打开，见下）。给了以后重启网关才进 CCAPP_SHARED
      */
     private void askAllFiles() {
@@ -1421,7 +1421,7 @@ public class MainActivity extends Activity {
         // Shizuku 授权了也先问（审查 v0.5.9 B2）：以前直接 appops 给，绕过了系统的专用同意界面
         new android.app.AlertDialog.Builder(this)
             .setTitle(Tr.t("允许访问共享存储"))
-            .setMessage(Tr.t("cccodroid 和其他应用交换文件（交付的 APK、截图、离线工具包）用的是 /sdcard/cccodroid。这个版本的安卓要你在设置里打开「所有文件访问」才能读写它。\n\n不开也能用，只是这些文件只留在应用私有目录里。"))
+            .setMessage(Tr.t("cccodroid 和其他应用交换文件（交付的 APK、截图、离线工具包）用的是 /sdcard/ccagentui。这个版本的安卓要你在设置里打开「所有文件访问」才能读写它。\n\n不开也能用，只是这些文件只留在应用私有目录里。"))
             .setPositiveButton(Tr.t("去开启"), (d, w) -> {
                 try { startActivity(new Intent("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION", Uri.parse("package:" + getPackageName()))); }
                 catch (Exception e) { try { startActivity(new Intent("android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION")); } catch (Exception ignored) {} }
