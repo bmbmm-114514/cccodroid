@@ -23,7 +23,7 @@
   try { if (k) sessionStorage.setItem("cc.bk", k); else k = sessionStorage.getItem("cc.bk") || ""; } catch {}
   const PLAIN = ["hasPane", "paneCanBack", "whatsNew", "nightMode", "keyed", "wallColor"];
   const KEYED = ["privShot", "openUrl", "paneOpen", "paneBounds", "paneGoBack", "paneClose", "openBrowser", "shareText", "copyText",
-    "pickDevkit", "uninstall", "unfreeze", "ensureGateway", "whatsNewSeen", "setBars", "skinPref", "accentPref", "langPref", "themePref", "saveAs", "previewNet", "skinPal", "gcPal", "shareDone", "inputFocus"];
+    "pickDevkit", "uninstall", "unfreeze", "ensureGateway", "whatsNewSeen", "setBars", "skinPref", "accentPref", "langPref", "themePref", "saveAs", "previewNet", "skinPal", "gcPal", "shareDone", "inputFocus", "chooseFrontend", "takeClassicSkin"];
   const w = {};
   for (const m of PLAIN) if (typeof raw[m] === "function") w[m] = (...a) => raw[m](...a);
   for (const m of KEYED) if (typeof raw[m] === "function") w[m] = (...a) => raw[m](k, ...a);
@@ -44,6 +44,15 @@
   let pref = "auto";
   try { pref = localStorage.getItem(LS) || "auto"; } catch {}
   if (!MODES.includes(pref)) pref = "auto";
+
+  // Apply only an explicit choice from the Android picker. Keep the saved brightness and fonts.
+  try {
+    const chosen = window.CCApp?.takeClassicSkin?.();
+    if (Object.prototype.hasOwnProperty.call(PREFIX, chosen)) {
+      pref = PREFIX[chosen] + modeOf(pref);
+      localStorage.setItem(LS, pref);
+    }
+  } catch {}
 
   let sysDark = null;   // 壳推过来的系统状态；null = 没推过
   function systemDark() {
@@ -379,3 +388,10 @@
     document.head.appendChild(s);
   } catch {}
 })();
+
+window.addEventListener("DOMContentLoaded", () => {
+  const b = document.getElementById("native-appearance");
+  if (!b || !window.CCApp?.chooseFrontend) return;
+  b.hidden = false;
+  b.addEventListener("click", () => window.CCApp.chooseFrontend());
+});

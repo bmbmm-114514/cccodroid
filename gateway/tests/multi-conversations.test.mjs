@@ -120,3 +120,15 @@ test("an unavailable destination does not spend the outgoing provider's quota", 
   assert.equal(db.view(id).activeAgent,"claude");
   assert.equal(db.view(id).turns.at(-1).error,"signed out");
 });
+
+test("outgoing Claude uses the previous turn's provider while the receiving Codex uses its own controls", async t => {
+  const {calls, send, id, db} = setup(t);
+  await send("claude", "use project key", {destinationProvider:"deepseek",destinationModel:"custom-chat"});
+  const request = await send("codex", "review", {destinationProvider:"chatgpt",destinationModel:"codex-model",effort:"high",serviceTier:"priority"});
+  assert.equal(calls[1].provider,"deepseek");
+  assert.equal(calls[1].model,"custom-chat");
+  assert.deepEqual([calls[2].destinationProvider,calls[2].effort,calls[2].serviceTier],["chatgpt","high","priority"]);
+  assert.equal(db.view(id).turns[1].handoff.provider,"deepseek");
+  assert.throws(() => db.send({...request,serviceTier:"default"}), /其他消息/);
+  assert.throws(() => db.send({...request,destinationProvider:"google"}), /不匹配/);
+});

@@ -556,9 +556,16 @@ const MSG_MAX = 2000000;                        // 字（UTF-16 码元）：两�
 const SID_OK = /^[A-Za-z0-9_-]{1,80}$/;
 /** 字符串数组：只留字符串，条数、每条长度、总长都有上限（总长见 settings-store 的 capList） */
 export const strList = (a, n, len, total) => capList(a, n, len, total);
+function interfaceDefaults(value) {
+  if (!value || typeof value.provider !== "string" || !/^[a-z0-9][a-z0-9_-]{0,79}$/i.test(value.provider)) return null;
+  return { provider:value.provider,
+    model:typeof value.model === "string" ? value.model.slice(0, 200) : "",
+    effort:typeof value.effort === "string" ? value.effort.slice(0, 20) : "" };
+}
 export function enqueue(body, commitHandoff) {
   const item = {
     id: newRunId(),
+    interfaceDefaults: interfaceDefaults(body.interfaceDefaults),
     message: String(body.message || ""),
     sessionId: body.sessionId ? String(body.sessionId) : null,
     follow: body.follow ? String(body.follow) : null,
@@ -666,7 +673,7 @@ export async function routeQueue(req, res, u, p) {
       }
     }
     // 看这条消息要用的那家（新会话首条选的 / 会话钉的 / 全局的），不是只看全局
-    const q0 = { sessionId: b.sessionId ? String(b.sessionId) : null, follow: b.follow || null, projectId: b.projectId ? String(b.projectId) : null,
+    const q0 = { interfaceDefaults: interfaceDefaults(b.interfaceDefaults), sessionId: b.sessionId ? String(b.sessionId) : null, follow: b.follow || null, projectId: b.projectId ? String(b.projectId) : null,
       pin: !b.sessionId && b.pin && typeof b.pin.provider === "string" ? { provider: b.pin.provider } : null };
     const pk = pickProvider(q0), bp = pk.P;
     // 要用的那家不在了（写错、删了）：当场拒，不悄悄换成全局默认那家发出去（起跑时 startRun 还会再挡一次）

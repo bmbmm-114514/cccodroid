@@ -93,6 +93,10 @@ export async function routeBookmarks(req, res, u, p) {
     catch { return sendJson(res, 200, { items: BM.map(pub), unreadable: true }); }
     const out = [], meta = new Map();
     let gone = 0;
+    if (BM.some(b => b.sid.startsWith("multi:"))) {
+      const { mainChatIndex } = await import("./multi.mjs");
+      for (const c of mainChatIndex()) meta.set("multi:"+c.id, {title:c.title});
+    }
     for (const b of BM) {
       if (!meta.has(b.sid)) {
         const f = findSessionFile(b.sid);
@@ -110,22 +114,32 @@ export async function routeBookmarks(req, res, u, p) {
   if (req.method === "POST" && p === "/api/bookmarks") {
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     const sid = String(b.session || ""), role = b.role === "user" ? "user" : "assistant";
-    if (!SID_RE.test(sid)) return sendJson(res, 400, { error: "bad session" });
-    const found = findSessionFile(sid);
-    if (!found) return sendJson(res, 404, { error: "session not found" });
+    const shared = sid.startsWith("multi:");
+    if (!SID_RE.test(shared ? sid.slice(6) : sid)) return sendJson(res, 400, { error: "bad session" });
     let uuid = UUID_RE.test(String(b.uuid || "")) ? String(b.uuid) : "", off = -1;
-    if (uuid) {
-      const hint = Math.max(0, Number(b.hint) || 0);
-      off = await findLineOffset(found.file, uuid, hint);
-      if (off < 0 && hint) off = await findLineOffset(found.file, uuid);
+    if (shared) {
+      const { mainChatTurn } = await import("./multi.mjs");
+      let turn;
+      try { turn = mainChatTurn(sid.slice(6), uuid); }
+      catch (e) { return sendJson(res, e.status || 500, {error:e.message}); }
+      if (!turn || !turn[role]) return sendJson(res, 404, {error:"message not found"});
+      b.excerpt = turn[role];
     } else {
-      const c = await claimTail(found.file, role, b.head, b.nth);
-      if (c) ({ uuid, off } = c);
+      const found = findSessionFile(sid);
+      if (!found) return sendJson(res, 404, { error: "session not found" });
+      if (uuid) {
+        const hint = Math.max(0, Number(b.hint) || 0);
+        off = await findLineOffset(found.file, uuid, hint);
+        if (off < 0 && hint) off = await findLineOffset(found.file, uuid);
+      } else {
+        const c = await claimTail(found.file, role, b.head, b.nth);
+        if (c) ({ uuid, off } = c);
+      }
+      if (!uuid || off < 0) return sendJson(res, 404, { error: "message not found" });
     }
-    if (!uuid || off < 0) return sendJson(res, 404, { error: "message not found" });
     const para = Math.max(0, Math.min(10000, Math.floor(Number(b.para) || 0)));
     // 同一处（同一条消息同一段）不重复加
-    const dup = BM.find((x) => x.sid === sid && x.uuid === uuid && x.para === para);
+    const dup = BM.find((x) => x.sid === sid && x.uuid === uuid && x.para === para && (!shared || x.role === role));
     if (dup) return sendJson(res, 200, { ok: true, item: pub(dup) });
     if (BM.filter((x) => x.sid === sid).length >= PER_SESSION) return sendJson(res, 409, { error: "full", limit: PER_SESSION });
     const item = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), sid, uuid, off, para, role,

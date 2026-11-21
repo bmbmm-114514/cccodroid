@@ -219,6 +219,18 @@ public class BrowserPane extends LinearLayout {
      *  风格由 theme.js → CCApp.skinPref 存在 prefs "ui" 的 skin：native（暖色 + 陶土橙）| qiusuo（DeepSeek Harness 的冷灰 + 蓝）| zhuyue（Kimi 式的黑白，强调色就是黑 / 白）| goucheng（构成主义：牛皮纸 + 墨黑 + 红）| shise（拾色：Material You，theme.js 按壁纸主色现算，经 CCApp.skinPal 存在 pal_light / pal_dark）。
      *  键：bg 页面底 / card 对话框 / field 输入框 / line 分隔线 / fg 正文 / dim 次要字 / hint 提示字 / accent 强调色 */
     static int pal(Context c, boolean night, String k) {
+        if (c instanceof android.app.Activity && NativeAppearance.nativeMode((android.app.Activity)c)) {
+            int attr;
+            switch (k) {
+                case "accent": attr = android.R.attr.colorAccent; break;
+                case "fg": attr = android.R.attr.textColorPrimary; break;
+                case "hint": case "dim": attr = android.R.attr.textColorSecondary; break;
+                case "line": attr = android.R.attr.colorControlHighlight; break;
+                case "card": case "field": attr = android.R.attr.colorBackgroundFloating; break;
+                default: attr = android.R.attr.colorBackground;
+            }
+            return NativeAppearance.resolveColor(c, attr, night ? 0xff121212 : 0xfffafafa);
+        }
         android.content.SharedPreferences ui = c.getSharedPreferences("ui", Context.MODE_PRIVATE);
         if ("accent".equals(k)) {     // 界面里自定了强调色（见 MainActivity.accentPref）就用它
             String own = ui.getString(night ? "accent_dark" : "accent_light", "");
@@ -250,6 +262,8 @@ public class BrowserPane extends LinearLayout {
 
     /** 跟界面里选的外观走（theme.js → CCApp.themePref 存在 prefs "ui"），没选过才看系统 */
     static boolean night(Context c) {
+        if (c instanceof android.app.Activity && NativeAppearance.nativeMode((android.app.Activity)c))
+            return (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         String p = c.getSharedPreferences("ui", Context.MODE_PRIVATE).getString("theme", "auto");
         if ("dark".equals(p)) return true;
         if ("light".equals(p)) return false;

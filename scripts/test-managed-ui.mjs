@@ -507,7 +507,7 @@ try {
   await click('#bc-selected [data-bc="model-remove"][data-model="synthetic-new-model"]');
   await click("#bc-save");
   await until(() => cdp.eval(visible("#bc-saved")), "multi-model configuration saved");
-  assert.deepEqual(fixture.state.configRequests.at(-1).models, [{ id: "large-synthetic", contextWindow: 512000 }, { id: "small-synthetic", contextWindow: 128000 }, { id: "unknown-synthetic", contextWindow: 200000 }]);
+  assert.deepEqual(fixture.state.configRequests.at(-1).models, [{ id: "large-synthetic", contextWindow: 512 * 1024 }, { id: "small-synthetic", contextWindow: 128000 }, { id: "unknown-synthetic", contextWindow: 200000 }]);
   assert.equal(fixture.state.configRequests.at(-1).model, "small-synthetic");
   await unchanged();
   ok("bridge multiple models and windows", "add/edit/remove/default, exact API windows, 200000 fallback and manual override; no inference");
@@ -527,7 +527,7 @@ try {
   assert.equal(await cdp.eval("document.querySelector('#bc-ctx').value"), "128000");
   await fill("#bc-model", "");
   await click('#bc-model-list [data-value="large-synthetic"]');
-  assert.equal(await cdp.eval("document.querySelector('#bc-ctx').value"), "512000", "suggestion selection restores this model's manual window, not the previous model's");
+  assert.equal(await cdp.eval("document.querySelector('#bc-ctx').value"), String(512 * 1024), "suggestion selection restores this model's manual window, not the previous model's");
   await click("#bc-save");
   await until(() => cdp.eval(visible("#bc-saved")), "reselected configured model saves without changing windows");
   assert.deepEqual(fixture.state.configRequests.at(-1).models, persistedModels);
@@ -548,7 +548,7 @@ try {
   assert.equal(await cdp.eval("__cc.state.sessions.length"), beforeConfig.count, "no persisted chat until user actually sends");
   assert.equal(fixture.state.requests.filter((r) => r.path === "/api/chat").length, 0);
   ok("bridge explicit new session", "only user action leaves current session and stages new provider/model; no chat or global switch");
-  for (const [model, window] of [["large-synthetic", 512000], ["unknown-synthetic", 200000], ["small-synthetic", 128000]]) {
+  for (const [model, window] of [["large-synthetic", 512 * 1024], ["unknown-synthetic", 200000], ["small-synthetic", 128000]]) {
     await click("#model-chip .chip");
     await until(() => cdp.eval(`!!document.querySelector('#model-pick .mp-item[data-id="${model}"]')`), "all configured models available in conversation picker");
     await click(`#model-pick .mp-item[data-id="${model}"]`);

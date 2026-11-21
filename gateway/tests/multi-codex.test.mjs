@@ -203,6 +203,7 @@ test("native model catalog follows cursors, excludes hidden rows and selected mo
   t.after(() => client.close());
   assert.deepEqual(await client.models(), {
     models: [{ id: "model-a", label: "First" }, { id: "model-b", label: "Second" }], defaultModel: "model-a",
+    effortModel: "model-a", efforts: [], defaultEffort: "", serviceTiers: [], defaultServiceTier: "",
   });
   for (const [model, expected] of [["model-b", "model-b"], ["", "model-a"]]) {
     await client.run({ ...params, threadId: "source", model });
@@ -220,4 +221,39 @@ test("an explicit Codex model cannot silently run a different model", async (t) 
   t.after(() => client.close());
   await assert.rejects(client.run({ ...params, model: "chosen" }), /未采用所选模型/);
   assert.equal(calls.some(m => m.method === "turn/start"),false);
+});
+
+test("Codex uses the selected model's advertised reasoning and speed, and resets both on resume", async t => {
+  let threadFast = true;
+  const modelA = { model: "A", isDefault: true, defaultReasoningEffort: "medium",
+    supportedReasoningEfforts: [{ reasoningEffort: "medium" }, { reasoningEffort: "xhigh", description: "More reasoning" }],
+    serviceTiers: [{ id: "priority", name: "Fast", description: "Increased usage" }] };
+  const modelB = { model: "B", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }],
+    defaultServiceTier: "priority", serviceTiers: modelA.serviceTiers };
+  const {client, calls} = fixture((child, msg) => {
+    if (msg.method === "model/list") child.reply(msg.id, { data: [modelA, modelB] });
+    else if (msg.method === "experimentalFeature/list") child.reply(msg.id, { data: [{ name: "fast_mode", enabled: !msg.params.threadId || threadFast }] });
+    else if (msg.method === "turn/start") {
+      child.reply(msg.id, { turn: { id: "turn" } });
+      complete(child, msg.params.threadId);
+    } else return;
+    return true;
+  });
+  t.after(() => client.close());
+  const info = await client.models("");
+  assert.equal(info.effortModel, "A");
+  assert.deepEqual(info.efforts.map(e => e.id), ["medium", "xhigh"]);
+  assert.deepEqual(info.serviceTiers.map(t => [t.id, t.label]), [["default", "标准"], ["priority", "Fast"]]);
+  assert.equal((await client.models("B")).defaultServiceTier, "priority");
+  assert.deepEqual((await client.models("custom")).efforts, []);
+  const tuning = () => calls.filter(m => m.method === "turn/start").map(m => [m.params.effort, m.params.serviceTier]);
+  await client.run({ ...params, model: "A", effort: "xhigh", serviceTier: "priority" });
+  await client.run({ ...params, threadId: "source", model: "A", effort: "", serviceTier: "" });
+  await client.run({ ...params, threadId: "source", model: "B", effort: "", serviceTier: "" });
+  await client.run({ ...params, threadId: "source", model: "B", effort: "low", serviceTier: "default" });
+  assert.deepEqual(tuning(), [["xhigh", "priority"], ["medium", "default"], ["low", "priority"], ["low", "default"]]);
+  await assert.rejects(client.run({ ...params, model: "B", effort: "xhigh" }), /思考强度/);
+  threadFast = false;
+  await assert.rejects(client.run({ ...params, model: "A", serviceTier: "priority" }), /服务档位/);
+  assert.equal(tuning().length, 4);
 });

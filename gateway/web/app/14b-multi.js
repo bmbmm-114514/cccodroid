@@ -119,10 +119,17 @@
     if (c) { view.histOk = true; view.title = c.title || ""; view.projectId = c.projectId || null; paintTitle(); paintProjChip(); }
     if (follow) chatEl.scrollTop = chatEl.scrollHeight;
   }
-  async function multiRefresh() {
+  let multiStateRead = null;
+  function multiRefresh() {
+    if (!multiChatActive() || document.hidden) return Promise.resolve();
+    if (multiStateRead?.seq === multi.seq && multiStateRead.id === multi.id) return multiStateRead.promise;
     multiPause();
-    if (!multiChatActive() || document.hidden) return;
-    const seq = multi.seq, id = multi.id;
+    const read = { seq:multi.seq, id:multi.id };
+    multiStateRead = read;
+    read.promise = readMultiState(read.seq, read.id).finally(() => { if (multiStateRead === read) multiStateRead = null; });
+    return read.promise;
+  }
+  async function readMultiState(seq, id) {
     try {
       const d = await api("/api/multi/state" + (id ? "?id="+encodeURIComponent(id) : ""), { timeout: 20000 });
       if (seq !== multi.seq) return;
@@ -239,7 +246,8 @@
         multi.id = r.id; view.sessionId = "multi:"+r.id; draftAdopt(view.sessionId); saveUiState(); draftPersist(); loadSessions();
       }
       const id = multi.id;
-      const body = { id, text, agent: choice.agent, destinationModel: choice.model || "", mode, selected };
+      const body = { id, text, agent: choice.agent, destinationModel: choice.model || "", destinationProvider: choice.provider,
+        effort: choice.effort || "", serviceTier: choice.serviceTier || "", mode, selected };
       if (mode === "third-party") Object.assign(body, { provider, model });
       const fingerprint = JSON.stringify(body), previous = multiAttempt(id);
       const attempt = previous?.fingerprint === fingerprint ? previous :

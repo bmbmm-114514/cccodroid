@@ -145,11 +145,24 @@ public class MainActivity extends Activity {
     private volatile CountDownLatch pickWait;
     private volatile Uri picked;
 
+    private NativeHome nativeHome;
+    private String paletteAtLaunch = "";
+    private android.app.WallpaperManager.OnColorsChangedListener nativeWallpaperListener;
+
     @Override protected void onCreate(Bundle b) {
         Tr.init(this);
         // 安装页、空白 WebView 都按界面里选的外观（浅 / 深 / 跟随系统）上色，别再"界面浅色、启动页深色"
-        setTheme(uiDark() ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
+        setTheme(NativeAppearance.nativeMode(this) ? NativeAppearance.theme(this)
+            : uiDark() ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
         super.onCreate(b);
+        if (NativeAppearance.nativeMode(this)) {
+            paletteAtLaunch = NativeAppearance.paletteKey(this);
+            if (Build.VERSION.SDK_INT >= 31) {
+                nativeWallpaperListener = (colors, which) -> ui.post(this::checkNativePalette);
+                try { android.app.WallpaperManager.getInstance(this).addOnColorsChangedListener(nativeWallpaperListener, ui); }
+                catch (RuntimeException unavailable) { nativeWallpaperListener = null; }
+            }
+        }
         // 启动画面结束就直接拿掉，不做淡出：淡出那半秒它压在安装页上，深浅不一致时就是一块颜色不对的区域
         if (Build.VERSION.SDK_INT >= 31) getSplashScreen().setOnExitAnimationListener(v -> v.remove());
         syncSplash();
@@ -169,6 +182,9 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (nativeHome != null) { nativeHome.dispose(); nativeHome = null; }
+        if (Build.VERSION.SDK_INT >= 31 && nativeWallpaperListener != null)
+            android.app.WallpaperManager.getInstance(this).removeOnColorsChangedListener(nativeWallpaperListener);
         if (fold != null) fold.stop();
         // 放掉这一个界面占着的东西（审查 #105 06-008）：窗格的 500ms 轮询、两个 WebView、网页的选文件回调、
         // 静态回调里捕获的本界面（新界面 showWeb 时会换成它自己的，这里只清还指着自己的）
@@ -261,7 +277,7 @@ public class MainActivity extends Activity {
                 askBatteryExemption();
                 say(Tr.t("等待网关…"));
                 waitGateway(true);
-                ui.post(() -> { if (isDestroyed()) return; showWeb(); booted = true; handle(pending); pending = null; });
+                ui.post(() -> { if (isDestroyed()) return; showFrontend(); booted = true; handle(pending); pending = null; });
                 // 后台快速自检：只看文件在不在，缺了就提示修复
                 if (!upd.devkitMoving() && !upd.devkitStaged()) upd.verifyAsync(false);
             } catch (Exception e) {
@@ -341,6 +357,7 @@ public class MainActivity extends Activity {
         Consent.runNext(this);   // 上次排着的锁屏签名（界面当时正在关、没问成）
         ui.removeCallbacks(fpsBeat); ui.postDelayed(fpsBeat, 30000);
         if (pane != null) pane.resume();
+        if (nativeHome != null) { checkNativePalette(); nativeHome.resume(); }
         pushWall();
         getSystemService(android.app.NotificationManager.class).cancel(41);    // Priv.toFront 的「点此回来」
         Notify.get(this).onForeground(); }                                    // 确认卡就在眼前，通知撤掉
@@ -351,6 +368,7 @@ public class MainActivity extends Activity {
         if (!isInMultiWindowMode()) { visible = false; Notify.get(this).onBackground(); } }
     @Override protected void onStop() {
         super.onStop();
+        if (nativeHome != null) nativeHome.pause();
         // 分屏里被整个切走 / 熄屏时 onPause 没记过账，这里补上；转屏重建不算到后台
         boolean was = visible;
         visible = false;
@@ -362,18 +380,18 @@ public class MainActivity extends Activity {
             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
     /** 界面里选的外观：theme.js 每次定下来都经 CCApp.themePref 存一份；没存过（第一次装）= 跟随系统 */
-    private boolean uiDark() { return BrowserPane.night(this); }
+    private boolean uiDark() { return NativeAppearance.nativeMode(this) ? systemNight() : BrowserPane.night(this); }
     /** 安卓 13+：下一次启动的启动画面按界面里选的外观上色（选「跟随系统」就交还系统）。系统记住这个选择，进程没起来时也生效 */
     private void syncSplash() {
         if (Build.VERSION.SDK_INT < 33) return;
-        String p = getSharedPreferences("ui", MODE_PRIVATE).getString("theme", "auto");
+        String p = NativeAppearance.nativeMode(this) ? "auto" : getSharedPreferences("ui", MODE_PRIVATE).getString("theme", "auto");
         int id = "auto".equals(p) ? 0 : getResources().getIdentifier("dark".equals(p) ? "LaunchDark" : "LaunchLight", "style", getPackageName());
         try { getSplashScreen().setSplashScreenTheme(id); } catch (Exception ignored) {}
     }
     /** 状态栏 / 导航栏跟着界面换色；浅色时图标改深色 */
     private void applyBars(boolean dark) {
         android.view.Window w = getWindow();
-        int bg = BrowserPane.pal(this, dark, "bg");
+        int bg = NativeAppearance.nativeMode(this) ? NativeAppearance.resolveColor(this, android.R.attr.colorBackground, 0) : BrowserPane.pal(this, dark, "bg");
         // 状态栏保持透明（见 edgeToEdge），只换图标深浅；安卓 11+ 导航栏也透明，页面底色透上来
         if (android.os.Build.VERSION.SDK_INT < 30) w.setNavigationBarColor(bg);
         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -427,6 +445,7 @@ public class MainActivity extends Activity {
 
     @Override public void onConfigurationChanged(android.content.res.Configuration cfg) {
         super.onConfigurationChanged(cfg);
+        checkNativePalette();
         applyLandBars();
         pushWall();
         if (web != null) web.evaluateJavascript(guarded("Theme.system", "window.Theme&&Theme.system(" + systemNight() + ")"), null);
@@ -669,7 +688,38 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
     }
 
+    private static final int REQ_NATIVE_ATTACHMENT = 12;
+    private static final int REQ_NATIVE_HISTORY = 13;
+
+    void pickNativeHistory() {
+        try { startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_NATIVE_HISTORY); }
+        catch (android.content.ActivityNotFoundException e) { android.widget.Toast.makeText(this, "无法打开文件选择器", android.widget.Toast.LENGTH_SHORT).show(); }
+    }
+    void pickNativeAttachment() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try { startActivityForResult(pick, REQ_NATIVE_ATTACHMENT); }
+        catch (android.content.ActivityNotFoundException e) { android.widget.Toast.makeText(this, "无法打开文件选择器", android.widget.Toast.LENGTH_SHORT).show(); }
+    }
+    void takeNativePhoto() {
+        try {
+            File f = Camera.newFile(this);
+            getSharedPreferences("ui", MODE_PRIVATE).edit().putString("camPending", f.getPath()).apply();
+            startActivityForResult(Camera.intent(this, f), REQ_CAMERA);
+        } catch (Exception e) { android.widget.Toast.makeText(this, "无法打开相机", android.widget.Toast.LENGTH_SHORT).show(); }
+    }
+
+    private void deliverShared(String owner, String event, String value) {
+        if (owner == null) { toPage(event, value); return; }
+        ui.post(() -> {
+            String text = "ccapp-attach".equals(event) ? "附件：" + value : value;
+            if (nativeHome != null && !isDestroyed()) nativeHome.addToDraft(owner, text);
+            else NativeChat.appendDraft(this, owner, text);
+        });
+    }
+
     private void copyShares(java.util.ArrayList<android.net.Uri> uris, String text) {
+        final String owner = nativeHome == null ? null : nativeHome.chatId;
         new Thread(() -> {
           try {
             java.io.File dir = new java.io.File(env.workspace(), "uploads");
@@ -678,7 +728,7 @@ public class MainActivity extends Activity {
             for (android.net.Uri u : uris) {
                 // 大文件在共享存储里有真实路径：直接给路径，不拷（附件大小门限，见 BIG_ATTACH）
                 String real = sizeOf(u) > BIG_ATTACH ? realPath(u) : null;
-                if (real != null) { n++; toPage("ccapp-attach", real); continue; }
+                if (real != null) { n++; deliverShared(owner, "ccapp-attach", real); continue; }
                 String name = displayName(u).replaceAll("[^\\w.\\-()\\u4e00-\\u9fff]+", "_").replaceAll("^[.\\s]+", "");
                 if (name.length() > 120) name = name.substring(name.length() - 120);
                 String stamp = new java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.US).format(new java.util.Date());
@@ -705,14 +755,14 @@ public class MainActivity extends Activity {
                     copyIn(in, o, dir);
                     n++;
                     shareMade(out.getPath());
-                    toPage("ccapp-attach", out.getPath());
+                    deliverShared(owner, "ccapp-attach", out.getPath());
                 } catch (Exception e) {
                     out.delete();
                     ui.post(() -> android.widget.Toast.makeText(this, Tr.f("分享的文件没收下：{0}", e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
                 }
             }
             // 分享文件时 EXTRA_TEXT 常是标题之类的附带说明，只有单纯分享文字时才插进去
-            if (n == 0 && uris.isEmpty() && text != null) toPage("ccapp-insert", text);
+            if (n == 0 && uris.isEmpty() && text != null) deliverShared(owner, "ccapp-insert", text);
           } catch (Throwable t) { android.util.Log.w("cccodroid", "分享处理失败", t); }
         }, "share-in").start();
     }
@@ -877,6 +927,10 @@ public class MainActivity extends Activity {
     /** 界面还没起来（进程被收掉后从选择器 / 相机回来，boot 还在走）：等一会儿再递，别丢 */
     private void toPage(String event, String value, int n) {
         ui.post(() -> {
+            if (nativeHome != null) {
+                if ("ccapp-insert".equals(event) || "ccapp-attach".equals(event)) nativeHome.share(value);
+                return;
+            }
             if (web == null) { if (n < 300) ui.postDelayed(() -> toPage(event, value, n + 1), 200); return; }
             web.evaluateJavascript("(function f(n){try{if(window.__cc&&window.__cc.view){window.dispatchEvent(new CustomEvent(" + org.json.JSONObject.quote(event)
                 + ",{detail:{value:" + org.json.JSONObject.quote(value) + "}}))}else if(n<150)setTimeout(function(){f(n+1)},200)}" + caught(event) + "})(0)", null);
@@ -894,6 +948,7 @@ public class MainActivity extends Activity {
     /** 从「已完成」通知点进来：切到那个会话（界面正显示它就不动）。页面可能还在启动，等 __cc 就绪 */
     private String pendingSid;
     private void openSession(String sid) {
+        if (nativeHome != null && sid != null && sid.matches("(?:multi:)?[a-zA-Z0-9-]{8,64}")) { nativeHome.openSession(sid); return; }
         if (web == null || sid == null || !sid.matches("[0-9A-Za-z-]{8,64}")) return;
         // 冷启动时页面还在 about:blank / 等网关：这里塞进去的轮询会被真正的导航冲掉。先记着，网关页面落地再发（审查 #49 待确认-2）
         if (!isOwnGateway(web.getUrl())) { pendingSid = sid; return; }
@@ -1164,7 +1219,7 @@ public class MainActivity extends Activity {
                 try { Thread.sleep(4000); } catch (InterruptedException ignored) {}
             }
             try { waitGateway(true); } catch (InterruptedException ignored) {}
-            ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
+            ui.post(() -> { if (!isDestroyed()) { showFrontend(); booted = true; } });
         }, "devkit-local").start();
     }
 
@@ -1265,7 +1320,7 @@ public class MainActivity extends Activity {
             say(Tr.t("（旧的工具包已经不在了的话，划掉应用重新打开会重新安装）"));
         }
         try { waitGateway(true); } catch (InterruptedException ignored) {}
-        ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
+        ui.post(() -> { if (!isDestroyed()) { showFrontend(); booted = true; } });
     }
 
     /** 等网关答话，最多约 60 秒。网关服务正在联网取回运行库时（GatewayService.gwFetchStep）不计时：
@@ -1658,6 +1713,25 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void checkNativePalette() {
+        if (isFinishing() || isDestroyed() || !NativeAppearance.nativeMode(this)) return;
+        String value = NativeAppearance.paletteKey(this);
+        if (!value.equals(paletteAtLaunch)) { paletteAtLaunch = value; recreate(); }
+    }
+
+    private void showFrontend() {
+        if (!NativeAppearance.nativeMode(this)) { showWeb(); return; }
+        if (isDestroyed() || isFinishing()) return;
+        if (nativeHome != null) nativeHome.dispose();
+        askPerms();
+        if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(true);
+        int surface = NativeAppearance.resolveColor(this, android.R.attr.colorBackground, getWindow().getStatusBarColor());
+        getWindow().setStatusBarColor(surface);
+        getWindow().setNavigationBarColor(surface);
+        applyBars(systemNight());
+        nativeHome = new NativeHome(this, () -> NativeAppearance.choose(this));
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private void showWeb() {
         // 后台线程（首装、替换工具包）收尾时界面可能已经被划掉：别在死掉的界面上新建 WebView，
@@ -1804,6 +1878,10 @@ public class MainActivity extends Activity {
             /** 页面上输入框被点了一下、或用户手势里它刚拿到焦点：确认主 WebView 有视图焦点，
              *  再重建输入连接、请键盘出来。视图焦点丢了、或输入法手里还是那条空连接时，
              *  只靠 JS focus() 只有边框变色，既没光标也没键盘。 */
+            @android.webkit.JavascriptInterface public String takeClassicSkin(String k) { return Env.bridgeOk(k) ? NativeAppearance.takeClassicSkin(MainActivity.this) : ""; }
+            @android.webkit.JavascriptInterface public void chooseFrontend(String k) {
+                if (Env.bridgeOk(k)) ui.post(() -> NativeAppearance.choose(MainActivity.this));
+            }
             @android.webkit.JavascriptInterface public void inputFocus(String k) { if (!Env.bridgeOk(k)) return;
                 ui.post(() -> {
                     final android.webkit.WebView w = web;
@@ -2459,6 +2537,18 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
+        if (req == REQ_NATIVE_HISTORY) {
+            if (res == RESULT_OK && data != null && data.getData() != null) NativeRequests.importHistory(this, data.getData(), message -> {
+                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show();
+                if (nativeHome != null && "sessions".equals(nativeHome.screen)) nativeHome.nav("sessions");
+            });
+            return;
+        }
+        if (req == REQ_NATIVE_ATTACHMENT) {
+            Uri[] picked = chooserResult(this, res, data);
+            if (picked != null && picked.length > 0) copyShares(new java.util.ArrayList<>(java.util.Arrays.asList(picked).subList(0, Math.min(32, picked.length))), null);
+            return;
+        }
         if (req == 9) { if (pane != null) pane.onResult(res, data); return; }
         if (req == REQ_DEVKIT) {
             Uri u = res == RESULT_OK && data != null ? data.getData() : null;
@@ -2676,6 +2766,7 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (nativeHome != null) { if (!nativeHome.back()) moveTaskToBack(true); return; }
         if (web == null) { moveTaskToBack(true); return; }
         // 先让页面关最上层的浮层（侧栏 / 查看器 / 终端 / 弹窗…，见 app.js __ccBack），都没开才退
         web.evaluateJavascript(guarded("__ccBack", "window.__ccBack?__ccBack():false"), v -> {

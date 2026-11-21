@@ -4,7 +4,9 @@
 
 This fork starts at upstream v0.7.14. Choose Claude Code, Codex, or Antigravity and its model in the main model and provider settings, then continue in the current chat. The APK includes all three clients and the base runtime for offline first-time setup. The built-in terminal exposes the same clients as `claude`, `codex`, and `agy`. Each client retains its native sign-in and session. Claude and Codex can hand work off from a native session fork using the original provider or a configured third-party model. Manual handoff sends the turns you select. Leaving Antigravity uses manual handoff.
 
-The 0.2.0 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
+The native Android interface follows system wallpaper colors on Android 12+ and system light/dark mode on older releases. Settings offers all five classic themes. The provider selector includes separate Claude, ChatGPT and Google sign-ins. Reasoning controls follow the selected model, with Fast available for supported Codex models.
+
+The 0.3.0 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
 
 The upstream documentation and upstream APK links follow below. [Integration notes in Chinese](README.zh-CN.md#多-agent-整合分支)
 

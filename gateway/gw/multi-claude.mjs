@@ -5,7 +5,7 @@ import { claudeBlocked, claudeCmd, claudeEnv, ensureBridge, killTree, settingsAr
 import { authStatus } from "./login.mjs";
 import { ensureLlama } from "./local.mjs";
 import { ensureManagedBridge } from "./managed-bridge.mjs";
-import { fetchModels, isLoginMode } from "./models.mjs";
+import { effortLevelsOf, fetchModels, isLoginMode } from "./models.mjs";
 import { PROVIDER, keyOf, providerBrief, providerById } from "./providers.mjs";
 import { QUEUE, abortRun, endRun, sidForItem } from "./queue.mjs";
 import { execIntent, startRun } from "./run.mjs";
@@ -27,10 +27,15 @@ export function claudeProviders() {
     .map(({ id, label, defaultModel }) => ({ id, label, defaultModel }));
 }
 
-export async function claudeModels() {
-  const provider = subscription();
+export async function claudeModels(requested = "", id = OFFICIAL) {
+  const provider = id === OFFICIAL ? subscription() : providerById(id);
+  if (!provider) throw new Error("未知的 Claude 接口");
   const list = await fetchModels(false, provider);
-  return { models: list.map(m => ({ id: m.id, label: m.name || m.id })), defaultModel: provider.defaultModel || "" };
+  const defaultModel = provider.defaultModel || "", effortModel = requested || defaultModel;
+  const meta = list.find(m => m.id === effortModel) || (!effortModel && list[0]) || {};
+  return { models: list.map(m => ({id:m.id,label:m.name || m.id})), defaultModel, effortModel,
+    efforts:effortLevelsOf(meta,provider).map(id => ({id,label:id})), defaultEffort:"", serviceTiers:[], defaultServiceTier:"" };
+
 }
 
 export async function claudeState() {
@@ -50,13 +55,15 @@ export async function claudeState() {
 
 // Admit the turn synchronously in the existing gateway runner. Busy native sessions must
 // finish first, even if they were opened in the classic conversation view.
-export async function runClaude({ sessionId, cwd, text, model, signal, onEvent = () => {} }) {
-  const p = subscription();
+export async function runClaude({ sessionId, cwd, text, model, effort, destinationProvider, signal, onEvent = () => {} }) {
+  const idProvider = destinationProvider || OFFICIAL;
+  const p = idProvider === OFFICIAL ? subscription() : providerById(idProvider);
+  if (!p || (idProvider !== OFFICIAL && !p.local && !keyOf(p))) throw new Error("所选 Claude 接口未配置");
   // A resumed CLI session can retain its old model. Explicit "engine default"
   // uses the official default alias (or this provider's configured default).
-  const selectedModel = sessionId && model === "" ? p.defaultModel || "default" : model;
-  const pin = !sessionId || model != null ? { provider: OFFICIAL, model: model || "" } : null;
-  if (selectedModel && execIntent({ sessionId, cwd, provider: OFFICIAL, pin, model: selectedModel }).model !== selectedModel) {
+  const selectedModel = sessionId && model === "" ? p.defaultModel || (idProvider === OFFICIAL ? "default" : undefined) : model;
+  const pin = !sessionId || model != null ? { provider: idProvider, model: model || "", ...(effort != null ? {effort} : {}) } : null;
+  if (selectedModel && execIntent({ sessionId, cwd, provider: idProvider, pin, model: selectedModel }).model !== selectedModel) {
     throw new Error("Claude Code 不支持所选模型：" + model);
   }
   if (signal?.aborted) throw stopError();
@@ -107,7 +114,7 @@ export async function runClaude({ sessionId, cwd, text, model, signal, onEvent =
       }
     });
     signal?.addEventListener("abort", stop, { once: true });
-    startRun({ id, message: text, sessionId, cwd, provider: OFFICIAL, model: selectedModel, pin,
+    startRun({ id, message: text, sessionId, cwd, provider: idProvider, model: selectedModel, effort, pin,
       permissionMode: "default" }).catch(err => {
       const live = RUNS.get(id);
       if (live) { error = err.message; endRun(live, { failed: true }); }
@@ -123,7 +130,7 @@ export async function handoffClaude({ sessionId, cwd, text, provider, model, sig
   if (signal?.aborted) throw stopError();
   if (runOfSession(sessionId)) throw new Error("请先结束当前 Claude 回合再交接。");
   const p = provider ? providerById(provider) : subscription();
-  if (!p || (provider && (p.login || !keyOf(p))) || p.endpointLost) throw new Error("所选交接接口未配置或不可用。");
+  if (!p || (provider && (p.login || (!p.local && !keyOf(p)))) || p.endpointLost) throw new Error("所选交接接口未配置或不可用。");
   const blocked = await claudeBlocked();
   if (blocked) throw new Error(blocked);
   await ensureManagedBridge(p, { signal });
@@ -135,7 +142,7 @@ export async function handoffClaude({ sessionId, cwd, text, provider, model, sig
   const settings = settingsArgs(p);
   const index = settings.indexOf("--settings");
   const cfg = index < 0 ? {} : JSON.parse(settings[index + 1]);
-  if (provider && !cfg.apiKeyHelper) throw new Error("所选接口的认证配置没有就绪。");
+  if (provider && !p.local && !cfg.apiKeyHelper) throw new Error("所选接口的认证配置没有就绪。");
   if (provider) delete env.CLAUDE_CODE_OAUTH_TOKEN;
   // Local/project hooks and tools must not execute during a read-only handoff.
   delete cfg.hooks;

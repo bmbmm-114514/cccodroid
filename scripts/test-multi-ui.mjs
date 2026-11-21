@@ -35,11 +35,21 @@ async function checkWorkbench() {
     quota: { claude: [{ name: "5h", remaining: 4, resetsAt: Date.now() + 3600000 }], codex: [], agy: [] },
   };
   const original = window.fetch, calls = [], errors = [];
+  const savedChoices = new Map();
+  let currentProvider = "anthropic";
+  function choices(body = {}) {
+    const provider = body.provider || currentProvider;
+    const agent = { google: "agy", chatgpt: "codex" }[provider] || "claude";
+    const result = { configured: true, agent, provider, model: "", effort: "", serviceTier: "", ...savedChoices.get(provider), ...body };
+    savedChoices.set(provider, result);
+    currentProvider = provider;
+    return result;
+  }
   let checkingLogin = false, imported = false, simulateDrop = "";
   window.addEventListener("error", event => errors.push(event.message));
   window.fetch = async (u, opts) => {
     const addr = new URL(u, location.href);
-    if (checkingLogin && addr.pathname === "/api/providers") {
+    if (addr.pathname === "/api/providers") {
       return Response.json({ active: "fixture", providers: [
         { id: "anthropic", login: true, group: "claude", label: "Claude Code" },
         { id: "fixture", group: "custom", custom: true, active: true, label: "Fixture" },
@@ -58,7 +68,12 @@ async function checkWorkbench() {
     let reply = { ok: true };
     if (action === "state") reply = { ...state, conversation: addr.searchParams.get("id") === chat.id ? chat : null };
     if (action === "create") { if (body.claudeSessionId) imported = true; reply = { id: chat.id }; }
-    if (action === "models") reply = { agent: addr.searchParams.get("agent"), models: [{ id: "fixture-destination", label: "Fixture" }] };
+    if (action === "preferences") reply = choices(body);
+    if (action === "models") reply = {
+      agent: addr.searchParams.get("agent"), models: [{ id: "fixture-destination", label: "Fixture" }],
+      efforts: [{ id: "high", label: "High" }], defaultEffort: "high",
+      serviceTiers: addr.searchParams.get("agent") === "codex" ? [{ id: "fast", label: "Fast" }] : [],
+    };
     if (action === "send") {
       if (simulateDrop === "before") { simulateDrop = ""; throw new TypeError("fixture lost connection"); }
       chat.turns.push({ id: "turn-" + (chat.turns.length + 1), requestId: body.requestId, agent: body.agent, user: body.text, assistant: "", status: "running" });
@@ -77,7 +92,17 @@ async function checkWorkbench() {
   window.__cc.openSession("synthetic-ui-a");
   await until(() => window.__cc.view.histOk, "original Claude chat");
   by("chat-agent-chip").click();
-  select("set-agent","codex");
+  await until(() => [...by("set-provider").options].some(o => o.value === "chatgpt"), "account provider options");
+  const order = [...by("set-provider").options].map(o => o.value);
+  assert(order.slice(order.indexOf("anthropic"), order.indexOf("anthropic")+3).join(",") === "anthropic,chatgpt,google", "official accounts ordered together");
+  select("set-provider", "chatgpt");
+  await until(() => !by("set-agent-tier-row").classList.contains("hidden"), "Codex service tier capabilities");
+  await until(() => !by("set-agent-login").disabled, "ChatGPT authorization enabled");
+  by("set-agent-login").click();
+  await until(() => calls.some(x => x.action === "login"), "Codex-specific login request");
+  assert(!calls.some(x => x.action === "agy-login"), "Codex login never starts Google authorization");
+  select("set-agent-tier", "fast");
+  select("set-agent-effort", "high");
   await until(() => calls.some(x => x.action === "create" && x.body.claudeSessionId === "synthetic-ui-a"), "import native Claude chat");
   by("set-x").click();
   assert(!by("side-nav").querySelector("[data-page=multi]"), "agent switching belongs to main chat");
@@ -96,6 +121,7 @@ async function checkWorkbench() {
   assert(by("input").value === "Review A", "original input after network failure");
   by("btn-send").click();
   await until(() => sent()?.agent === "codex" && by("btn-send").classList.contains("busy"), "Codex turn");
+  assert(sent().destinationProvider === "chatgpt" && sent().effort === "high" && sent().serviceTier === "fast", "Codex reasoning and Fast reach send");
   assert(sent().requestId === firstRequest, "same request ID after a dropped connection");
   assert(sent().selected.join() === first.id && sent().mode === "manual", "selected history");
   by("btn-send").click();
@@ -113,7 +139,9 @@ async function checkWorkbench() {
   chat.activeRun = null; chat.turns.at(-1).status = "done"; chat.activeAgent = "agy";
   by("ma-retry").click();
   await until(() => !by("btn-send").classList.contains("busy"), "Google handoff completed");
-  select("set-agent", "claude");
+  by("chat-agent-chip").click();
+  select("set-provider", "anthropic");
+  by("set-x").click();
   assert(by("ma-mode").value === "manual", "manual handoff from Google");
   assert(!by("ma-warning").classList.contains("hidden"), "low quota");
   by("ma-dismiss").click(); by("ma-retry").click();
@@ -132,18 +160,29 @@ async function checkWorkbench() {
   await until(() => window.__cc.view.sessionId === "synthetic-ui-b" && window.__cc.view.histOk, "other native chat");
   window.__cc.openSession("synthetic-ui-a");
   await until(() => window.__cc.view.sessionId === "multi:"+chat.id && by("ma-turns").textContent.includes(first.assistant), "native project link restores the shared conversation");
-  checkingLogin = true;
+  checkingLogin = true; state.agy.installed = true;
   by("chat-agent-chip").click();
-  await until(() => !by("set-ov").classList.contains("hidden") && by("set-agent").value === "claude", "main agent settings");
-  select("set-agent", "agy");
+  await until(() => !by("set-ov").classList.contains("hidden") && by("set-provider").value === "anthropic", "main agent settings");
+  select("set-provider", "google");
   await until(() => [...by("set-agent-model").options].some(o => o.value === "fixture-destination"), "official model list");
   select("set-agent-model","fixture-destination");
+  await until(() => !by("set-agent-effort-row").classList.contains("hidden"), "Google model effort");
+  assert(by("set-agent-tier-row").classList.contains("hidden"), "Fast belongs to Codex");
+  assert(by("set-agent-login").textContent.includes("Google") && by("prov-card").classList.contains("hidden"), "only Google authorization is visible");
+  select("set-agent-effort", "high");
+  await until(() => !by("set-agent-login").disabled, "Google authorization enabled");
+  by("set-agent-login").click();
+  await until(() => calls.some(x => x.action === "agy-login"), "Google-specific authorization request");
+  assert(calls.filter(x => x.action === "login").length === 1, "Google login never starts a second Codex login");
   by("set-x").click();
   window.__cc.newConversation();
   chat.activeRun = null; chat.activeAgent = null; chat.turns.length = 0;
-  compose("New Google project");
+  by("input").value = "New Google project";
+  by("input").dispatchEvent(new Event("input"));
+  await until(() => !by("btn-send").disabled && !by("btn-send").classList.contains("busy"), "new conversation ready to send");
+  by("btn-send").click();
   await until(() => sent()?.text === "New Google project", "send from fresh main conversation");
-  assert(sent().agent === "agy" && sent().destinationModel === "fixture-destination", "selected Google model reaches the destination");
+  assert(sent().agent === "agy" && sent().destinationProvider === "google" && sent().destinationModel === "fixture-destination" && sent().effort === "high" && sent().serviceTier === "", "selected Google model reaches the destination");
   assert(calls.some(x => x.action === "create" && !x.body.claudeSessionId && x.body.title === "New Google project"), "new chat created without importing another session");
   assert(!errors.length, errors.join("\n"));
 }
@@ -185,7 +224,7 @@ try {
   timer = setTimeout(() => finish("Timed out waiting for Chromium"), 45000);
   result = await complete;
   if (result) throw Error(result);
-  console.log("PASS main composer, Claude import, Codex and Google models, handoffs, approvals, retry, lost acknowledgements, and quota warnings");
+  console.log("PASS main composer, Claude import, provider order, isolated Codex/Google login, reasoning and Fast, handoffs, approvals, retry, lost acknowledgements, and quota warnings");
 } finally {
   clearTimeout(timer);
   if (browser?.pid && browser.exitCode === null) {

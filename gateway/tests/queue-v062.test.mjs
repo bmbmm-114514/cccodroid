@@ -66,6 +66,19 @@ test("撤销 follow 链中间的排队项：后面的消息仍续首条跑出来
   }
 });
 
+test("经典主题统一接口是单轮请求默认值，已有会话选择优先", () => {
+  const sessionId = crypto.randomUUID();
+  const interfaceDefaults = {provider:"anthropic", model:"claude-choice", effort:""};
+  const item = {sessionId, interfaceDefaults};
+  assert.equal(pickProvider(item).P.id, "anthropic");
+  assert.equal(execIntent(item).model, "claude-choice");
+  assert.equal(execIntent({...item, pin:{provider:"anthropic", model:"claude-pin"}}).model, "claude-pin");
+  try {
+    setSessModel(sessionId, {provider:"anthropic", model:"claude-session"});
+    assert.equal(execIntent(item).model, "claude-session");
+  } finally { clearSessModel(sessionId); }
+});
+
 test("空闲进程复用前核对执行配置：换了模型就不再自动塞进旧进程（#120-2）", () => {
   fill();
   const sid = crypto.randomUUID();

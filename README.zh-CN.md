@@ -9,7 +9,11 @@
 - 收到有效额度数据后，当前 Agent 的适用额度窗口剩余 5% 或更少时会提醒。Antigravity 使用官方 CLI 的内建 `/usage` 命令读取订阅额度，未返回有效百分比时显示未知。
 - 在已有 Claude 对话中更换 Agent 后，原聊天记录会保留在主对话里。原版和独立版安装在同一台手机时各有自己的数据目录，从原版导出、在独立版导入后即可选择旧会话。
 
-测试版 0.2.0 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
+原生安卓是默认界面。Android 12 及以上使用系统莫奈配色，Android 8–11 跟随系统深浅色。「设置 → 界面与主题」可选择原版暖色、求索、逐月、构成或拾色，并保留经典界面的亮度、字体和强调色设置。
+
+「接口与模型」列出 Claude、ChatGPT 和 Google 三种账号登录方式。Codex 和 Antigravity 的思考强度来自当前客户端的模型目录，支持优先服务的 Codex 模型也可切换 Fast。
+
+测试版 0.3.0 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
 
 下文保留上游 cccodroid 的介绍与原版下载链接。
 

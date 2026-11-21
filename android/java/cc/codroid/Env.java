@@ -62,6 +62,11 @@ final class Env {
 
     /** 同上，指定方法；body 是之后要写出去的请求体（没有给 null），签名里带它的 sha256，调用方照旧自己 setDoOutput 再写 */
     static java.net.HttpURLConnection gateway(String method, String path, byte[] body) throws java.io.IOException {
+        try { return gatewayWithDigest(method, path, java.security.MessageDigest.getInstance("SHA-256").digest(body == null ? new byte[0] : body)); }
+        catch (java.security.NoSuchAlgorithmException e) { throw new java.io.IOException(e); }
+    }
+
+    static java.net.HttpURLConnection gatewayWithDigest(String method, String path, byte[] digest) throws java.io.IOException {
         if (!proveGateway()) throw new java.io.IOException(HOST + ":" + PORT + " 上不是 cccodroid 的网关（还没起来，或被别的应用占了）");
         String b = boot;
         java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + path);
@@ -73,7 +78,7 @@ final class Env {
             byte[] nb = new byte[16];
             new java.security.SecureRandom().nextBytes(nb);
             String ts = String.valueOf(System.currentTimeMillis()), n = hex(nb);
-            String bh = hex(java.security.MessageDigest.getInstance("SHA-256").digest(body == null ? new byte[0] : body));
+            String bh = hex(digest);
             c.setRequestProperty("X-CC-Body", bh);
             c.setRequestProperty("X-CC-Sig", ts + "." + n + "." + hmac(token(), "sig2:" + b + ":" + HOST + ":" + method + ":" + ts + ":" + n + ":" + bh + ":" + path));
         } catch (Exception e) { throw new java.io.IOException(e); }

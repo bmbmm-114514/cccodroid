@@ -110,6 +110,7 @@ export function pickProvider(item) {
     || (item.pin && item.pin.provider && providerById(item.pin.provider))
     || (rec0 && rec0.model != null ? sessProvider(sid0) : null)
     || (pdef0.provider && providerById(pdef0.provider))
+    || (item.interfaceDefaults && providerById(item.interfaceDefaults.provider))
     || sessProvider(sid0) };
 }
 
@@ -126,9 +127,11 @@ export function execIntent(item, ctx) {
   const own = own0 && (own0.model == null || own0.provider === P.id) ? own0 : null;
   const ownM = pin.model != null ? pin.model : own && own.model != null ? own.model : null;
   const ownE = pin.effort != null ? pin.effort : own && own.effort != null ? own.effort : null;
-  let effort = item.effort || (ownE != null ? ownE : pdef0.effort || SETTINGS.effort) || "";
+  const picked = item.interfaceDefaults?.provider === P.id ? item.interfaceDefaults : null;
+  let effort = item.effort || (ownE != null ? ownE : pdef0.effort || (picked ? picked.effort : SETTINGS.effort)) || "";
   // 项目默认的模型名是给项目那家的（没指定家就是全局那家），全局默认的是给全局那家的；对不上的不作数，走这家自己的默认
-  const fallM = (P.id === (pdef0.provider || PROVIDER.id) ? pdef0.model : "") || (P.id === PROVIDER.id ? SETTINGS.model : "");
+  const fallM = (P.id === (pdef0.provider || item.interfaceDefaults?.provider || PROVIDER.id) ? pdef0.model : "")
+    || (picked ? picked.model : P.id === PROVIDER.id ? SETTINGS.model : "");
   let model = (item.model || (ownM != null ? ownM : fallM) || P.defaultModel || (P.explicit ? "" : CFG.model) || "").trim();
   // 原生厂商只认 claude 自家的模型名；别家的名字（切厂商前留下的）宁可不传，交给 claude 自己选
   if (P.nativeModels && model && !/^(claude-|opus|sonnet|haiku|fable|default|best)/i.test(model)) model = "";
@@ -220,8 +223,9 @@ export function lostProvider(item, sid0, pdef0) {
   if (item.pin && item.pin.provider) return gone(item.pin.provider) ? tz("指定的接口「{id}」不存在，这一轮没有发出去。", { id: item.pin.provider }) : "";
   const s = sessLostProvider(sid0);
   if (s) return tz("这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。", { id: s });
-  if (sessModel(sid0)) return "";
+  if (sessModel(sid0)?.model != null) return "";
   if (pdef0 && gone(pdef0.provider)) return tz("项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。", { id: pdef0.provider });
+  if (!pdef0?.provider && gone(item.interfaceDefaults?.provider)) return tz("指定的接口「{id}」不存在，这一轮没有发出去。", { id: item.interfaceDefaults.provider });
   return "";
 }
 
@@ -255,7 +259,7 @@ export async function startRun(item) {
     sched: item.sched || null,         // 定时任务跑的：{ taskId, runKey }（结束时 sched.mjs 记运行记录）
     unattended: !!item.unattended,     // 没人看着：要确认的一律拒绝
     // 被系统结束后「重发」要按原样发：项目、钉的模型、权限模式、附加目录、汇合来源都记进运行标记（0.6.9 审计 195-AA.5）
-    req: Object.fromEntries(Object.entries({ projectId: item.projectId, pin: item.pin, model: item.model, permissionMode: item.permissionMode,
+    req: Object.fromEntries(Object.entries({ projectId: item.projectId, pin: item.pin, interfaceDefaults:item.interfaceDefaults, model: item.model, permissionMode: item.permissionMode,
       addDirs: item.addDirs && item.addDirs.length ? item.addDirs : null, mergeFrom: item.mergeFrom }).filter(([, v]) => v != null)),
   };
   // 进程起来之前（拉模型、问设备工具、读建档提示都要等）用户改权限模式：先记下来，起进程时按最新的那个启动；

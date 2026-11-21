@@ -526,7 +526,14 @@
   }
 
   $("set-provider").addEventListener("change", (e) => {
-    state.provView = e.target.value; provOpen = null;
+    const id = e.target.value;
+    state.provView = id; provOpen = null;
+    if (accountForProvider(id)) {
+      syncAccountProvider(id);
+    } else {
+      const item = state.providers?.find(p => p.id === id);
+      if (item && (item.hasKey || item.local)) syncAccountProvider(id);
+    }
     renderProvCard();
   });
 
@@ -534,7 +541,7 @@
   $("set-model").addEventListener("change", async (e) => {
     const model = e.target.value;
     if (!(await saveSettings({ model }))) return;
-    if (currentAgentChoice().agent === "claude" && state.providerActive === "anthropic") setAgentChoice("claude", model);
+    if (currentAgentChoice().agent === "claude" && state.providerActive === "anthropic") saveAccountControl("model", model);
     await loadModels();                                  // 换模型后 effort 档位可能不同
   });
   $("set-perm").addEventListener("change", (e) => changePermMode(e.target.value));
@@ -824,40 +831,95 @@
   // 主聊天和设置读取同一份选择。每个订阅单独记住型号，空字符串表示让引擎决定。
   const agentChoiceKey = "cc.chat.agentChoice";
   const agentAccountNames = { claude: "Claude", codex: "ChatGPT", agy: "Google" };
+  const accountProviders = { claude: "anthropic", codex: "chatgpt", agy: "google" };
+  function accountForProvider(id) {
+    return Object.keys(accountProviders).find(agent => accountProviders[agent] === id);
+  }
   function readAgentChoice() {
+    let stored;
+    try { stored = JSON.parse(localStorage.getItem(agentChoiceKey)); } catch {}
+    const agent = Object.hasOwn(accountProviders, stored?.agent) ? stored.agent : "claude";
+    return { agent, provider: stored?.provider || accountProviders[agent], model: stored?.model ?? stored?.models?.[agent] ?? "",
+      effort: stored?.effort || "", serviceTier: stored?.serviceTier || "", configured: !!stored?.configured };
+  }
+  let providerChoiceCurrent = readAgentChoice(), providerChoiceSeq = 0, choiceWrites = Promise.resolve();
+  function currentAgentChoice() { return { ...providerChoiceCurrent }; }
+  function providerChoiceCommit(next) {
+    const changed = ["agent", "provider", "model", "effort", "serviceTier"].some(key => next[key] !== providerChoiceCurrent[key]);
+    providerChoiceCurrent = next;
+    try { localStorage.setItem(agentChoiceKey, JSON.stringify(next)); } catch {}
+    if (changed) window.dispatchEvent(new Event("agent-choice-changed"));
+  }
+  function saveAccountChoice(patch) {
+    const seq = ++providerChoiceSeq;
+    const next = patch.provider === providerChoiceCurrent.provider ? { ...providerChoiceCurrent, ...patch }
+      : { model: "", effort: "", serviceTier: "", ...patch };
+    if ("model" in patch && next.model !== providerChoiceCurrent.model) { next.effort = ""; next.serviceTier = ""; }
+    providerChoiceCommit({ ...next, configured:true });
+    choiceWrites = choiceWrites.then(async () => {
+      try {
+        const saved = await post("/api/multi/preferences", patch);
+        if (seq === providerChoiceSeq) providerChoiceCommit(saved);
+      } catch (e) {
+        toast(e.message, true);
+        if (seq === providerChoiceSeq) await restoreAccountChoice();
+      }
+    });
+    return choiceWrites;
+  }
+  function syncAccountProvider(provider) {
+    return saveAccountChoice({ provider, agent: accountForProvider(provider) || "claude" });
+  }
+  function saveAccountControl(field, value) {
+    const { provider, agent } = currentAgentChoice();
+    return saveAccountChoice({ agent, provider, [field]: value });
+  }
+  async function restoreAccountChoice() {
+    const seq = providerChoiceSeq;
     try {
-      const p = JSON.parse(localStorage.getItem(agentChoiceKey));
-      if (p && Object.hasOwn(agentAccountNames, p.agent) && p.models && typeof p.models === "object") return p;
-    } catch {}
-    return { agent: "claude", models: {} };
-  }
-  let agentChoicePrefs = readAgentChoice();
-  function currentAgentChoice() {
-    const agent = agentChoicePrefs.agent;
-    const official = (state.providerActive || state.settings?.provider) === "anthropic";
-    const previous = agent === "claude" && official ? state.settings?.model : "";
-    const model = agentChoicePrefs.models[agent] ?? previous;
-    return { agent, model: typeof model === "string" ? model : "" };
-  }
-  function setAgentChoice(agent, model) {
-    if (!Object.hasOwn(agentAccountNames, agent)) return;
-    if (model !== undefined && (typeof model !== "string" || model.length > 200 || /[\x00-\x1f\x7f]/.test(model))) return;
-    const before = currentAgentChoice();
-    const firstModel = model !== undefined && !Object.hasOwn(agentChoicePrefs.models, agent);
-    agentChoicePrefs.agent = agent;
-    if (model !== undefined) agentChoicePrefs.models[agent] = model.trim();
-    try { localStorage.setItem(agentChoiceKey, JSON.stringify(agentChoicePrefs)); } catch {}
-    const after = currentAgentChoice();
-    if (firstModel || before.agent !== after.agent || before.model !== after.model) window.dispatchEvent(new Event("agent-choice-changed"));
+      const next = await api("/api/multi/preferences");
+      if (seq !== providerChoiceSeq || !Object.hasOwn(accountProviders, next.agent)) return;
+      if (next.configured === false && seq === 0) {
+        let old;
+        try { old = JSON.parse(localStorage.getItem(agentChoiceKey)); } catch {}
+        if (old?.models && Object.hasOwn(accountProviders, old.agent)) {
+          const provider = old.agent === "claude" ? next.provider : accountProviders[old.agent];
+          const model = old.models[old.agent] ?? (old.agent === next.agent ? next.model : "");
+          return saveAccountChoice({ agent: old.agent, provider, model });
+        }
+      }
+      providerChoiceCommit(next);
+    } catch { if (seq === providerChoiceSeq) window.dispatchEvent(new Event("agent-choice-changed")); }
   }
   window.addEventListener("storage", e => {
     if (e.key === agentChoiceKey || e.key === null) {
-      agentChoicePrefs = readAgentChoice();
+      providerChoiceCurrent = readAgentChoice();
       window.dispatchEvent(new Event("agent-choice-changed"));
     }
   });
-
-  let settingsAgent = "", agentSettingsSeq = 0, agentAccountRead = 0, agentAccountTimer = 0, agentVerifyUrl = "";
+  function paintAccountControls() {
+    const choice = currentAgentChoice(), catalog = agentModelList || {};
+    for (const [suffix, field, items, def] of [
+      ["effort", "effort", catalog.efforts, catalog.defaultEffort], ["tier", "serviceTier", catalog.serviceTiers, catalog.defaultServiceTier]
+    ]) {
+      const visible = accountForProvider(state.provView) && items?.length && (suffix !== "tier" || choice.agent === "codex");
+      $("set-agent-" + suffix + "-row").classList.toggle("hidden", !visible);
+      if (!visible) continue;
+      const sel = $("set-agent-" + suffix);
+      sel.replaceChildren(new Option(def ? t("（默认：{model}）", {model:def}) : t("引擎默认"), ""),
+        ...items.filter(item => item.id).map(item => new Option(item.label || item.id, item.id)));
+      sel.value = choice[field] || "";
+    }
+  }
+  function paintAccountSections(id) {
+    const agent = accountForProvider(id);
+    $("set-agent-login-card").classList.toggle("hidden", !agent || agent === "claude");
+    $("set-agent-model-row").classList.toggle("hidden", !agent);
+    $("set-agent-custom").classList.toggle("hidden", !agent || !agentModelDraft);
+    $("set-claude-interfaces").classList.toggle("hidden", !!agent && agent !== "claude");
+    paintAccountControls();
+  }
+  let settingsProvider = "", settingsModel = "", catalogRead = 0, agentSettingsSeq = 0, agentAccountRead = 0, agentAccountTimer = 0, agentVerifyUrl = "";
   let agentModelList = null, agentModelError = "", agentModelDraft = false;
   const agentSigningIn = new Set(), agentLoginBusy = new Set();
   const agentLoginErrors = new Map();
@@ -871,18 +933,19 @@
     options.push(new Option(t("自定义模型…"), customAgentModel));
     sel.replaceChildren(...options);
     sel.value = agentModelDraft ? customAgentModel : model;
-    $("set-agent-custom").classList.toggle("hidden", !agentModelDraft);
+    paintAccountSections(state.provView);
     $("set-agent-model-note").textContent = agentModelError || (!agentModelList ? t("正在读取…") : "");
   }
   async function refreshAgentModels(agent, seq) {
+    const { provider, model } = currentAgentChoice(), read = ++catalogRead;
     try {
-      const r = await api("/api/multi/models?agent=" + encodeURIComponent(agent));
-      if (seq !== agentSettingsSeq || !setVisible("provider")) return;
+      const r = await api("/api/multi/models?" + new URLSearchParams({ agent, provider, model }));
+      if (read !== catalogRead || seq !== agentSettingsSeq || !setVisible("provider")) return;
       if (r.agent !== agent || !Array.isArray(r.models)) throw new Error(t("读取模型清单失败"));
       agentModelList = r;
       agentModelError = "";
     } catch (e) {
-      if (seq !== agentSettingsSeq || !setVisible("provider")) return;
+      if (read !== catalogRead || seq !== agentSettingsSeq || !setVisible("provider")) return;
       agentModelError = e.message;
     }
     paintAgentModel();
@@ -932,9 +995,10 @@
     if (live()) agentAccountTimer = setTimeout(() => refreshAgentAccount(agent, seq), delay);
   }
   function openAgentSettings() {
-    const { agent } = currentAgentChoice(), seq = ++agentSettingsSeq;
-    settingsAgent = agent;
-    $("set-agent").value = agent;
+    const { agent, provider, model } = currentAgentChoice(), seq = ++agentSettingsSeq;
+    settingsProvider = provider; settingsModel = model;
+    state.provView = provider; $("set-provider").value = provider;
+    renderProvCard();
     $("set-agent-account").textContent = t("{name} 账户", { name: agentAccountNames[agent] });
     $("set-agent-status").textContent = t("查询中…");
     $("set-agent-login").textContent = t("登录 {name}", { name: agentAccountNames[agent] });
@@ -943,41 +1007,26 @@
     $("set-agent-error").classList.add("hidden");
     $("set-agent-code").value = "";
     agentVerifyUrl = "";
-    $("set-claude-interfaces").classList.toggle("hidden", agent !== "claude");
+    clearTimeout(agentAccountTimer);
     agentModelDraft = false; agentModelList = null; agentModelError = "";
     paintAgentModel();
-    refreshAgentModels(agent, seq);
-    refreshAgentAccount(agent, seq);
+    if (accountForProvider(provider)) refreshAgentModels(agent, seq);
+    if (agent !== "claude") refreshAgentAccount(agent, seq);
   }
   window.addEventListener("agent-choice-changed", () => {
     if (!setVisible("provider")) return;
-    if (settingsAgent !== currentAgentChoice().agent) openAgentSettings();
-    else paintAgentModel();
+    paintActiveProvider();
+    const { provider, model, agent } = currentAgentChoice();
+    if (settingsProvider !== provider) openAgentSettings();
+    else if (model !== settingsModel) {
+      settingsModel = model; agentModelList = null; paintAgentModel(); refreshAgentModels(agent, agentSettingsSeq);
+    } else paintAgentModel();
   });
-  $("set-agent").addEventListener("change", e => setAgentChoice(e.target.value));
-  async function saveAgentModel(model) {
-    const { agent } = currentAgentChoice(), seq = agentSettingsSeq;
-    const sid = view.sessionId, gen = view.gen;
-    if (agent === "claude") {
-      let provider;
-      try { provider = (await sameGet("/api/providers")).active; }
-      catch (e) { toast(e.message, true); if (seq === agentSettingsSeq) paintAgentModel(); return; }
-      if (provider === "anthropic") {
-        if (!(await saveSettings({ model }))) { if (seq === agentSettingsSeq) paintAgentModel(); return; }
-        loadModels();
-      }
-      if (!sid?.startsWith("multi:") && view.sessionId === sid && view.gen === gen && (curProv() || provider) === "anthropic") {
-        try { await pickSessModel({ provider: "anthropic", model }); }
-        catch (e) { if (!e.stale) { toast(e.message, true); paintAgentModel(); return; } }
-      }
-    }
-    if (currentAgentChoice().agent !== agent) {
-      agentChoicePrefs.models[agent] = model;
-      try { localStorage.setItem(agentChoiceKey, JSON.stringify(agentChoicePrefs)); } catch {}
-      return;
-    }
+  $("set-agent-effort").addEventListener("change", e => saveAccountControl("effort", e.target.value));
+  $("set-agent-tier").addEventListener("change", e => saveAccountControl("serviceTier", e.target.value));
+  function saveAgentModel(model) {
     agentModelDraft = false;
-    setAgentChoice(agent, model);
+    saveAccountControl("model", model);
     paintAgentModel();
   }
   $("set-agent-model").addEventListener("change", e => {
@@ -1023,4 +1072,7 @@
     if (code) submitAgentLogin(code);
   });
   // 等后续聊天分段装好监听器，再把本次 WebView 恢复的选择交给它。
-  queueMicrotask(() => window.dispatchEvent(new Event("agent-choice-changed")));
+  queueMicrotask(() => {
+    window.dispatchEvent(new Event("agent-choice-changed"));
+    restoreAccountChoice();
+  });

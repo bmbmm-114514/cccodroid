@@ -50,3 +50,29 @@ test("claimTail 认领最后一条开头相同的回复，角色不同不算", a
   assert.equal((await claimTail(file, "user", "问题 4")).uuid, ids[4][0]);
   assert.equal(await claimTail(file, "assistant", ""), null);
 });
+
+test("bookmarks on both sides of a shared turn survive listing without a Claude transcript", async t => {
+  const { CFG } = await import("../gw/config.mjs");
+  const { routeBookmarks } = await import("../gw/bookmarks.mjs");
+  const { Readable } = await import("node:stream");
+  const id = crypto.randomUUID(), turn = crypto.randomUUID(), sid = "multi:" + id;
+  const dir = path.join(CFG.home, "multi-agent", "conversations");
+  fs.mkdirSync(dir, {recursive:true});
+  const file = path.join(dir, id + ".json");
+  fs.writeFileSync(file, JSON.stringify({id,title:"multi bookmark",cwd:DIR,sessions:{},turns:[{id:turn,agent:"codex",user:"question",assistant:"answer",status:"done"}]}));
+  t.after(() => fs.rmSync(file,{force:true}));
+  async function request(method, data) {
+    const req = Readable.from(data ? [Buffer.from(JSON.stringify(data))] : []);
+    req.headers = {}; req.method = method;
+    let status, result;
+    await routeBookmarks(req, {writeHead(code) { status=code; }, end(bytes) { result=JSON.parse(bytes); }}, new URL("http://localhost/api/bookmarks"), "/api/bookmarks");
+    assert.equal(status, 200);
+    return result;
+  }
+  const first = await request("POST", {session:sid,uuid:turn,role:"user"});
+  const second = await request("POST", {session:sid,uuid:turn,role:"assistant"});
+  assert.notEqual(first.item.id, second.item.id);
+  assert.equal((await request("POST", {session:sid,uuid:turn,role:"user"})).item.id, first.item.id);
+  const saved=(await request("GET")).items.filter(i=>i.sid===sid);
+  assert.deepEqual(saved.map(i=>i.excerpt),["question","answer"]);
+});

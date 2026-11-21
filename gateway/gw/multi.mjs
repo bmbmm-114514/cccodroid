@@ -5,6 +5,7 @@ import { holdMultiActivity } from "./runs.mjs";
 import { agyModels, agyState, installAgy, loginAgy, respondAgy, runAgy, stopAgyLogin } from "./multi-agy.mjs";
 import { agyQuota } from "./multi-agy-quota.mjs";
 import { shutdownAgentTransports } from "./multi-rpc.mjs";
+import { checkedSelection, getChoice, saveChoice, agentFor } from "./multi-preferences.mjs";
 import { CFG } from "./config.mjs";
 import { NEXT, readBodyBuf, sendJson } from "./http.mjs";
 import { PROJECTS, projectById, projectOfDir } from "./projects.mjs";
@@ -120,7 +121,12 @@ const codexAdapter = {
 };
 function store() {
   return repository ||= conversationStore(path.join(CFG.home, "multi-agent", "conversations"), {
-    claude: { run: runClaude, handoff: handoffClaude, async ready() {
+    claude: { run: runClaude, handoff: handoffClaude, async ready(provider) {
+      if (provider && provider !== "anthropic") {
+        const p = providerById(provider);
+        if (!p || (!p.local && !keyOf(p))) throw problem("所选 Claude 接口未配置", 409);
+        return;
+      }
       const state = await claudeState();
       if (state.loggedIn !== true) throw problem("请先确认 Claude 订阅登录状态", 409);
     } }, codex: codexAdapter, agy: agyAdapter
@@ -128,6 +134,7 @@ function store() {
 }
 
 export function mainChatIndex() { return store().list(); }
+export function mainChatTurn(id, turnId) { return store().view(id).turns.find(t => t.id === turnId); }
 
 // Use the same visible transcript parser as the existing conversation screen.
 // Do not export hidden thinking, hook input or credentials during migration.
@@ -174,16 +181,20 @@ export async function routeMulti(req, res, u, p) {
   if (!p.startsWith("/api/multi/")) return NEXT;
   const action = p.slice("/api/multi/".length);
   try {
+    if (action === "preferences" && req.method === "GET") return sendJson(res, 200, getChoice(u.searchParams.get("provider")));
     if (action === "models" && req.method === "GET") {
       const agent = u.searchParams.get("agent");
+      const model = checkedSelection(u.searchParams.get("model") || "");
+      const provider = u.searchParams.get("provider");
+      if (provider && agentFor(provider) !== agent) throw problem("该接口与所选 Agent 不匹配");
       let catalog;
-      if (agent === "claude") catalog = await claudeModels();
+      if (agent === "claude") catalog = await claudeModels(model, provider || "anthropic");
       else if (agent === "codex") {
         if (!installation().installed) throw problem("请先安装 Codex", 409);
-        catalog = await (await client()).models();
+        catalog = await (await client()).models(model);
       } else if (agent === "agy") {
         if (!agyState().installed) throw problem("请先安装 Antigravity", 409);
-        catalog = await agyModels();
+        catalog = await agyModels({model});
       } else throw problem("请选择有效的 Agent");
       return sendJson(res, 200, { agent, ...catalog });
     }
@@ -205,6 +216,7 @@ export async function routeMulti(req, res, u, p) {
     catch (e) { throw problem("请求正文无效", e.status || 400); }
     if (!b || typeof b !== "object" || Array.isArray(b)) throw problem("请求正文无效");
     switch (action) {
+      case "preferences": return sendJson(res, 200, saveChoice(b));
       case "edit": store().edit(b.id, b); break;
       case "create": return sendJson(res, 201, { id: await createConversation(b) });
       case "send": store().send(b); break;

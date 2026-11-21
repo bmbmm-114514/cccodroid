@@ -27,7 +27,7 @@ public class BrowserActivity extends Activity implements BrowserPane.Host {
 
     @Override protected void onCreate(Bundle b) {
         boolean night = BrowserPane.night(this);       // 跟界面里选的外观走
-        setTheme(night ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
+        setTheme(NativeAppearance.nativeMode(this) ? NativeAppearance.theme(this) : night ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
         super.onCreate(b);
         Log.i(BrowserPane.TAG, "onCreate saved=" + (b != null));
         int bg = BrowserPane.pal(this, night, "bg");

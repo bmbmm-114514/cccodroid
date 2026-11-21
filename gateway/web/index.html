@@ -462,7 +462,7 @@
           </div>
           <div class="srow">
             <div class="sl"><b data-i18n>外观</b><p data-i18n>原生、「求索」「逐月」「构成」或「拾色」配色</p></div>
-            <div class="sc"><span class="seg" id="seg-skin"><button data-sk="native" data-i18n>原生</button><button data-sk="qiusuo" data-i18n>求索</button><button data-sk="zhuyue" data-i18n>逐月</button><button data-sk="goucheng" data-i18n>构成</button><button data-sk="shise" data-i18n>拾色</button></span></div>
+            <div class="sc"><button id="native-appearance" type="button" class="btn ghost sm" hidden>切换安卓原生界面</button><span class="seg" id="seg-skin"><button data-sk="native" data-i18n>原生</button><button data-sk="qiusuo" data-i18n>求索</button><button data-sk="zhuyue" data-i18n>逐月</button><button data-sk="goucheng" data-i18n>构成</button><button data-sk="shise" data-i18n>拾色</button></span></div>
           </div>
           <div class="srow">
             <div class="sl"><b data-i18n>深浅</b></div>
@@ -557,18 +557,28 @@
         <div class="set-cat hidden" data-cat="provider">
           <h3 class="set-h" data-i18n>模型与接口</h3>
           <div class="srow">
-            <div class="sl"><b><label for="set-agent">Agent</label></b><p data-i18n>下一条消息使用所选 Agent。</p></div>
-            <div class="sc"><select id="set-agent"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="agy">Antigravity</option></select></div>
+            <div class="sl"><b><span data-i18n>接口</span> <span class="pill" id="provider-count"></span></b><p id="provider-info" data-i18n>正在读取…</p></div>
+            <div class="sc"><select id="set-provider"></select><button class="btn sm ghost" id="prov-more"></button></div>
           </div>
-          <div class="srow">
+          <!-- 选中那一家的配置卡：账户登录 / 密钥 / 自定义接口，由 app.js 按类型渲染 -->
+          <div class="sblock prov-card" id="prov-card"></div>
+          <div class="srow" id="set-agent-model-row">
             <div class="sl"><b><label for="set-agent-model" data-i18n>订阅模型</label></b><p id="set-agent-model-note" role="status"></p></div>
             <div class="sc"><select id="set-agent-model"></select></div>
+          </div>
+          <div class="srow hidden" id="set-agent-effort-row">
+            <div class="sl"><b><label for="set-agent-effort" data-i18n>思考强度</label></b></div>
+            <div class="sc"><select id="set-agent-effort"></select></div>
+          </div>
+          <div class="srow hidden" id="set-agent-tier-row">
+            <div class="sl"><b><label for="set-agent-tier" data-i18n>速度（Fast）</label></b></div>
+            <div class="sc"><select id="set-agent-tier"></select></div>
           </div>
           <form id="set-agent-custom" class="srow hidden">
             <div class="sl"><b><label for="set-agent-model-id" data-i18n>模型 ID</label></b></div>
             <div class="sc"><input type="text" id="set-agent-model-id" required maxlength="200" dir="ltr" spellcheck="false" autocomplete="off"><button type="submit" class="btn sm" data-i18n>保存</button></div>
           </form>
-          <div class="sblock">
+          <div class="sblock" id="set-agent-login-card">
             <div class="srow head">
               <div class="sl"><b id="set-agent-account"></b><p id="set-agent-status" role="status"></p></div>
               <div class="sc"><button type="button" class="btn sm" id="set-agent-login" data-i18n>登录账户</button></div>
@@ -588,12 +598,6 @@
             <div class="prov-state err hidden" id="set-agent-error" role="alert"></div>
           </div>
           <details id="set-claude-interfaces"><summary data-i18n>Claude 接口与高级设置</summary>
-          <div class="srow">
-            <div class="sl"><b><span data-i18n>接口</span> <span class="pill" id="provider-count"></span></b><p id="provider-info" data-i18n>正在读取…</p></div>
-            <div class="sc"><select id="set-provider"></select><button class="btn sm ghost" id="prov-more"></button></div>
-          </div>
-          <!-- 选中那一家的配置卡：账户登录 / 密钥 / 自定义接口，由 app.js 按类型渲染 -->
-          <div class="sblock prov-card" id="prov-card"></div>
           <div class="srow" id="prov-show-row">
             <div class="sl"><b data-i18n>在模型选单里显示</b><p id="prov-show-info" class="clamp" data-i18n>关掉后输入栏的模型选单里不列这一家，配置和密钥照留，随时能再打开。没登录的官方账户、没下过模型的端侧本来就不列。</p></div>
             <div class="sc"><input type="checkbox" class="sw" id="set-provshow"></div>

@@ -112,12 +112,16 @@
         if (r0 === "timeout" && !view.sessionId && !view.lastRunId) throw new Error(t("上一条还没送到网关，这条先没发，稍后再试"));
       }
       posted = true;
+      const choice = typeof currentAgentChoice === "function" ? currentAgentChoice() : null;
       const r = await api("/api/chat", {
         method: "POST", headers: { "content-type": "application/json" },
         timeout: 20000,   // 入队即回执；网关半死时别永远转圈（FIND-035）
         body: JSON.stringify({
           message: text,
           idem,     // 网关按它在窗口内去重：重发回原 run，不另起一条（FIND-048/036）
+          interfaceDefaults: choice?.configured && choice.agent === "claude" ? {
+            provider: choice.provider, model: choice.model, effort: choice.effort
+          } : undefined,
           sessionId: view.sessionId,
           // 新会话还没拿到会话号时连发：告诉网关"跟在上一条后面"，它会接到同一个会话里
           follow: view.sessionId ? null : view.lastRunId,

@@ -21,28 +21,43 @@
       const r = await api("/api/providers");
       state.providers = r.providers || [];
       state.providerActive = r.active;
-      if (!state.provView || (state.provView !== "__new__" && !state.providers.some((p) => p.id === state.provView))) {
+      if (!state.provView || (!accountForProvider(state.provView) && state.provView !== "__new__" && !state.providers.some((p) => p.id === state.provView))) {
         state.provView = r.active;
       }
       const sel = $("set-provider");
       const groups = {};
       for (const p of state.providers) (groups[p.group] = groups[p.group] || []).push(p);
       const opt = (p) => {
-        const tag = p.active ? "● " : "";
+        const tag = p.id === currentAgentChoice().provider ? "● " : "";
         const st = p.login ? "" : (p.hasKey ? "" : (provEn() ? " · no key yet" : t(" · 未配 Key")));
         return `<option value="${esc(p.id)}">${tag}${esc(pLabel(p))}${st}</option>`;
       };
       sel.innerHTML = ["claude", "third", "local", "custom"].filter((g) => g !== "local" || groups.local).map((g) =>
-        `<optgroup label="${GROUP_NAME[g]}">` + (groups[g] || []).map(opt).join("") +
+        `<optgroup label="${GROUP_NAME[g]}">` + (groups[g] || []).map(p => {
+          if (p.id !== "anthropic") return opt(p);
+          return opt(p) + ["chatgpt", "google"].map(id => {
+            const label = agentAccountNames[accountForProvider(id)];
+            return `<option value="${id}">${id === currentAgentChoice().provider ? "● " : ""}${esc(provEn() ? label + " account login" : label + " 账户登录")}</option>`;
+          }).join("");
+        }).join("") +
         (g === "custom" ? `<option value="__new__">${provEn() ? "+ Add a custom endpoint…" : t("＋ 新增自定义接口…")}</option>` : "") + `</optgroup>`).join("");
       sel.value = state.provView;
-      $("provider-count").textContent = t("{n} 个", { n: state.providers.length });
-      const cur = state.providers.find((p) => p.id === r.active) || {};
-      $("provider-info").textContent = t("当前在用：{name}", { name: pLabel(cur) || r.active });
-      $("provider-info").title = cur.baseUrl || "";
+      $("provider-count").textContent = t("{n} 个", { n: state.providers.length + 2 });
+      paintActiveProvider();
       if (setVisible("provider")) renderProvCard();
     } catch (e) {
       $("provider-info").textContent = t("读取接口清单失败：{msg}", { msg: e.message });
+    }
+  }
+
+  function paintActiveProvider() {
+    const active = currentAgentChoice().provider;
+    const cur = state.providers?.find(p => p.id === active) || {};
+    $("provider-info").textContent = t("当前在用：{name}", { name:pLabel(cur) || agentAccountNames[accountForProvider(active)] || active });
+    $("provider-info").title = cur.baseUrl || "";
+    for (const option of $("set-provider").options) {
+      const label = option.textContent.replace(/^● /, "");
+      option.textContent = option.value === active ? "● " + label : label;
     }
   }
 
@@ -50,7 +65,7 @@
   let provOpen = null;
   function foldProvCard() {
     const id = state.provView, p = (state.providers || []).find((x) => x.id === id);
-    const auto = !(p && p.active && (p.login || p.local || p.hasKey));
+    const auto = id === "anthropic" || !(p && p.active && (p.login || p.local || p.hasKey));
     const open = provOpen == null ? auto : provOpen;
     $("prov-card").classList.toggle("hidden", !open);
     $("prov-more").textContent = open ? t("收起") : t("详情");
@@ -75,8 +90,12 @@
   function renderProvCard() {
     const box = $("prov-card");
     const id = state.provView;
+    const separateAccount = id === "chatgpt" || id === "google";
+    $("prov-more").classList.toggle("hidden", separateAccount);
     foldProvCard();
+    if (separateAccount) box.classList.add("hidden");
     paintProvShow();
+    paintAccountSections(id);
     // 卡片容器是复用的：密钥卡 / 自定义卡会在它上面挂 onclick（闭包里记着那一家）。
     // 换卡前必须摘掉，否则旧处理还在 —— 在登录卡上点「使用这个接口」，冒泡上来又把接口切回上一家
     // （实测：同一毫秒发出 provider=anthropic 和 provider=deepseek，后者赢）。
@@ -90,14 +109,15 @@
     return renderKeyCard(box, p);
   }
 
-  const useBtn = (p) => p.active
+  const useBtn = (p) => currentAgentChoice().provider === p.id
     ? `<span class="pill">${t("● 正在使用")}</span>`
     : `<button class="btn sm" data-act="use">${t("使用这个接口")}</button>`;
 
   async function useProvider(p) {
-    if (!p.login && !p.hasKey) return toast(t("先填 Key 并保存"), true);
+    if (!p.login && !p.local && !p.hasKey) return toast(t("先填 Key 并保存"), true);
     const r = await saveSettings({ provider: p.id });
     if (!r) return;
+    await syncAccountProvider(p.id);
     await loadSettings();
     await refreshStatus();
     refreshSessModel();       // 跟随默认的会话：标签、模型面板跟着换到新接口（审查 D-02）

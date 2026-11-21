@@ -190,6 +190,8 @@ export async function startManagedUiServer({ handleRequest } = {}) {
         return json(res, { items: [{ role: "assistant", text: `Synthetic history ${id === SESSION_A ? "A" : "B"}`, uuid: id + "-history" }], title: sessions.find((s) => s.id === id).title, cursor: 0, next: 1, size: 1 });
       }
       const routes = {
+        "/api/ext/off": { comp:[], mod:[] },
+        "/api/multi/preferences": { agent: "claude", provider: state.providerActive, model: "", effort: "", serviceTier: "", configured: false },
         "/api/settings": { permissionMode: "default", outputStyles: [], addDirs: [], model: "synthetic-model", maxParallel: 3 },
         "/api/capabilities": { version: "synthetic", slashCommands: [{ name: "context", desc: "Synthetic only" }], tools: ["Read"], skills: [], agents: [], plugins: [], mcpServers: [], rules: { allow: [], ask: [], deny: [] } },
         "/api/providers": { active: state.providerActive, providers: [{ id: "synthetic", label: "Synthetic (no model)", labelEn: "Synthetic (no model)", group: "custom", active: true, hasKey: true, baseUrl: "https://synthetic.invalid", custom: true }, { id: "synthetic-bridge", label: "Synthetic local bridge", labelEn: "Synthetic local bridge", group: "custom", active: false, hasKey: true, baseUrl: "http://127.0.0.1:1", custom: true, bridge: "openai-bridge" }] },

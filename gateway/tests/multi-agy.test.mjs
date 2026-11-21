@@ -166,7 +166,8 @@ test("Antigravity model picker uses the native ACP selector and switches before 
       child.answer(msg,{stopReason:"end_turn"}); return true;
     }
   },{sessionCapabilities:{resume:{},close:{}}});
-  assert.deepEqual(await agyModels(options), { defaultModel:"first", models:[{id:"first",label:"First"},{id:"second",label:"Second"}] });
+  assert.deepEqual(await agyModels(options), { defaultModel:"first", models:[{id:"first",label:"First"},{id:"second",label:"Second"}],
+    efforts:[], defaultEffort:"", effortModel:"first", fastSupported:false });
   assert.ok(calls.some(m=>m.method==="session/close"));
   assert.ok(!calls.some(m=>m.method==="session/prompt"));
   assert.equal((await runAgy({...turn,sessionId:"old",model:"second"},options)).text,"second");
@@ -175,4 +176,82 @@ test("Antigravity model picker uses the native ACP selector and switches before 
   const previousPrompts = calls.filter(m=>m.method==="session/prompt").length;
   await assert.rejects(runAgy({...turn,sessionId:"old",model:"unavailable"},options),/未提供所选模型/);
   assert.equal(calls.filter(m=>m.method==="session/prompt").length,previousPrompts);
+});
+
+test("Antigravity discovers thought levels after selecting the target model and applies them before prompting", async () => {
+  const defaults = { "fixture-a": "balanced", "fixture-b": "brief" };
+  const levels = { "fixture-a": ["balanced","deep"], "fixture-b": ["brief","extended"], "fixture-fixed":[] };
+  let active, effort, rejectChange = false;
+  const opts = () => [
+    { type:"select", id:"pick-model", category:"model", currentValue:active,
+      options:Object.keys(levels).map(value => ({value, name:value})) },
+    ...(levels[active].length ? [{ type:"select", id:"agy-native-level", category:"thought_level", currentValue:effort,
+      options:[{group:"supported", options:levels[active].map(value => ({value, name:"Label " + value}))}] }] : []),
+  ];
+  const {options,calls} = fake((child,m) => {
+    if (m.method === "session/new" || m.method === "session/resume") {
+      active = m.method === "session/new" ? "fixture-a" : "fixture-b";
+      effort = m.method === "session/new" ? defaults[active] : "extended";
+      child.answer(m,{sessionId:m.params.sessionId || "meta",configOptions:opts()}); return true;
+    }
+    if (m.method === "session/set_config_option") {
+      if (m.params.configId === "pick-model") { active=m.params.value; effort=defaults[active]; }
+      else {
+        assert.equal(m.params.configId,"agy-native-level");
+        assert.ok(levels[active].includes(m.params.value));
+        if (!rejectChange) effort=m.params.value;
+      }
+      child.answer(m,{configOptions:opts()}); return true;
+    }
+    if (m.method === "session/prompt") {
+      child.update(m.params.sessionId,{sessionUpdate:"agent_message_chunk",content:{type:"text",text:active+"/"+effort}});
+      child.answer(m,{stopReason:"end_turn"}); return true;
+    }
+  });
+  const catalog = await agyModels({...options,model:"fixture-b"});
+  assert.deepEqual(catalog.efforts,[{id:"brief",label:"Label brief"},{id:"extended",label:"Label extended"}]);
+  assert.equal(catalog.defaultModel,"fixture-a");
+  assert.equal(catalog.defaultEffort,"brief");
+  assert.equal(catalog.effortModel,"fixture-b");
+  assert.equal(catalog.fastSupported,false);
+  assert.equal(calls.some(m => m.method === "session/prompt"),false);
+  assert.equal((await runAgy({...turn,model:"fixture-b",effort:"extended"},options)).text,"fixture-b/extended");
+  assert.equal((await runAgy({...turn,sessionId:"old",model:"fixture-b",effort:""},options)).text,"fixture-b/brief");
+  assert.equal((await runAgy({...turn,model:"fixture-fixed",effort:""},options)).sessionId,"meta");
+  const prompts = calls.filter(m => m.method === "session/prompt").length;
+  await assert.rejects(runAgy({...turn,model:"fixture-b",effort:"deep"},options),/不支持所选思考强度/);
+  await assert.rejects(runAgy({...turn,model:"fixture-fixed",effort:"deep"},options),/不支持所选思考强度/);
+  rejectChange=true;
+  await assert.rejects(runAgy({...turn,model:"fixture-b",effort:"extended"},options),/未确认所选思考强度/);
+  assert.equal(calls.filter(m => m.method === "session/prompt").length,prompts);
+});
+
+test("variant-only Antigravity catalogs send the advertised native ID for the chosen family and effort", async () => {
+  const available = [
+    {modelId:"neon-low",name:"Neon (Low)"}, {modelId:"neon-high",name:"Neon (High)"},
+    {modelId:"silent-low",name:"Silent"}, {modelId:"solo-thinking",name:"Solo (Thinking)"},
+  ];
+  let active;
+  const {options,calls} = fake((child,m) => {
+    if (m.method === "session/new" || m.method === "session/resume") {
+      active = m.method === "session/new" ? "neon-low" : "neon-high";
+      child.answer(m,{sessionId:m.params.sessionId || "meta", models:{currentModelId:active,availableModels:available}}); return true;
+    }
+    if (m.method === "session/set_model") { active=m.params.modelId; child.answer(m,{}); return true; }
+    if (m.method === "session/prompt") {
+      child.update(m.params.sessionId,{sessionUpdate:"agent_message_chunk",content:{type:"text",text:active}});
+      child.answer(m,{stopReason:"end_turn"}); return true;
+    }
+  });
+  const catalog = await agyModels({...options,model:"neon"});
+  assert.deepEqual(catalog.models.map(m=>m.id),["neon","silent-low","solo-thinking"]);
+  assert.equal(catalog.defaultModel,"neon");
+  assert.equal(catalog.defaultEffort,"low");
+  assert.deepEqual(catalog.efforts.map(e=>e.id),["low","high"]);
+  assert.equal((await runAgy({...turn,model:"neon",effort:"high"},options)).text,"neon-high");
+  assert.equal((await runAgy({...turn,model:"neon",effort:"",sessionId:"old"},options)).text,"neon-low");
+  assert.equal((await runAgy({...turn,model:"neon-high"},options)).text,"neon-high");
+  await assert.rejects(runAgy({...turn,model:"neon-high",effort:"low"},options),/变体不支持/);
+  assert.equal(calls.some(m => m.method === "session/set_config_option"),false);
+  assert.deepEqual((await agyModels({...options,model:"solo-thinking"})).efforts,[]);
 });

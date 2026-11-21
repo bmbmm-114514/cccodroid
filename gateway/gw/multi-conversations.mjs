@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { agentFor, checkedSelection } from "./multi-preferences.mjs";
 import { saveState } from "./statefile.mjs";
 
 const engines = new Set(["claude", "codex", "agy"]);
@@ -87,10 +88,16 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
     }
     const destinationModel = input.destinationModel ?? "";
     if (typeof destinationModel !== "string" || destinationModel.length > 200 || /[\x00-\x1f\x7f]/.test(destinationModel)) throw problem("目标模型名称无效");
+    const effort = input.effort == null ? undefined : checkedSelection(input.effort, 120);
+    const serviceTier = input.serviceTier == null ? undefined : checkedSelection(input.serviceTier, 120);
+    const destinationProvider = input.destinationProvider || {claude:"anthropic", codex:"chatgpt", agy:"google"}[agent];
+    if (agentFor(destinationProvider) !== agent || (serviceTier && agent !== "codex")) throw problem("接口或服务档位与 Agent 不匹配");
     const c = read(id);
     const old = c.turns.find(t => t.requestId === requestId);
     if (old) {
-      if (old.user !== text || old.agent !== agent || (old.model || "") !== destinationModel.trim()) throw problem("请求编号已用于其他消息", 409);
+      if (old.user !== text || old.agent !== agent || (old.model || "") !== destinationModel.trim() ||
+          (old.effort || "") !== (effort || "") || (old.serviceTier || "") !== (serviceTier || "") ||
+          (old.destinationProvider && old.destinationProvider !== destinationProvider)) throw problem("请求编号已用于其他消息", 409);
       return;
     }
     if (Array.from(jobs.values()).some(j => (c.projectId && c.projectId === j.c.projectId) ||
@@ -106,7 +113,7 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
     }
     if (switching && from === "agy" && mode !== "manual") throw problem("Antigravity 交接请手动选择需要的记录");
     if (switching && mode === "third-party" && !input.provider) throw problem("请选择交接模型接口");
-    const turn = { id: randomUUID(), requestId, agent, model: destinationModel.trim(), user: text, assistant: "", status: "running", at: Date.now() };
+    const turn = { id: randomUUID(), requestId, agent, model: destinationModel.trim(), destinationProvider, effort, serviceTier, user: text, assistant: "", status: "running", at: Date.now() };
     c.turns.push(turn);
     if (c.turns.length === 1 && c.title === "新对话") c.title = text.trim().slice(0, 60);
     save(c);
@@ -140,7 +147,7 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
       let context = "";
       if (switching) {
         // Verify the target is available before spending a source-side model call.
-        await adapters[turn.agent].ready?.();
+        await adapters[turn.agent].ready?.(turn.destinationProvider);
         signal.throwIfAborted();
         turn.handoff = { from, mode, provider: mode === "third-party" ? input.provider : from };
         if (mode === "manual") {
@@ -150,8 +157,11 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
           const instruction = "你正在为用户交接项目。只整理与你收到的下一项任务相关的已确认决定、文件、测试结果与未完成事项。区分已验证与待验证。不要执行工具、修改文件或替用户执行任务。"
             + (lastSeen ? "\n接手方上次处理的请求是：" + JSON.stringify(lastSeen.user.slice(0, 1500)) + "。优先交代此后的变化。" : "")
             + "\n用户下一项任务（仅用于判断相关性）：" + JSON.stringify(turn.user);
+          const previous = c.turns.slice(0, -1).findLast(t => t.agent === from && (t.status === "done" || t.assistant));
+          const sourceProvider = from === "claude" && previous?.destinationProvider !== "anthropic" ? previous?.destinationProvider : undefined;
+          if (mode === "outgoing" && sourceProvider) turn.handoff.provider = sourceProvider;
           const result = await adapters[from].handoff({ sessionId: c.sessions[from], cwd: c.cwd, text: instruction,
-            provider: mode === "third-party" ? input.provider : undefined, model: mode === "third-party" ? input.model : undefined, signal });
+            provider: mode === "third-party" ? input.provider : sourceProvider, model: mode === "third-party" ? input.model : previous?.model || undefined, signal });
           context = result.text;
           if (!context?.trim()) throw problem("交接未返回内容，请重试或手动选择");
         }
@@ -162,7 +172,7 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
       signal.throwIfAborted();
       j.stage = "running";
       const prompt = context ? "以下是之前会话的参考记录。\n" + JSON.stringify(context) + "\n\n用户本轮请求：\n" + turn.user : turn.user;
-      const result = await adapters[turn.agent].run({ sessionId: c.sessions[turn.agent], cwd: c.cwd, model: turn.model, text: prompt, signal, onEvent: storeEvent });
+      const result = await adapters[turn.agent].run({ sessionId: c.sessions[turn.agent], cwd: c.cwd, model: turn.model, effort: turn.effort, serviceTier: turn.serviceTier, destinationProvider: turn.destinationProvider, text: prompt, signal, onEvent: storeEvent });
       if (result.sessionId) c.sessions[turn.agent] = result.sessionId;
       if (result.text) turn.assistant = result.text;
       signal.throwIfAborted();

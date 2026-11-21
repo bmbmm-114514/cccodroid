@@ -40,7 +40,7 @@ function thirdPartyConfig(provider) {
 }
 
 export function createCodexClient(options = {}) {
-  let transport, ready, defaultModelId;
+  let transport, ready, modelCatalog;
   const runs = new Map();
   const reserved = new Set();
   const approvals = new Map();
@@ -55,7 +55,7 @@ export function createCodexClient(options = {}) {
     if (rpc !== transport) return;
     transport = null;
     ready = null;
-    defaultModelId = undefined;
+    modelCatalog = undefined;
     approvals.clear();
     for (const run of runs.values()) run.done.reject(err);
     if (rpc.initialized && !rpc.intentionalClose) emit(null, { type: "disconnect", error: err.message });
@@ -87,25 +87,73 @@ export function createCodexClient(options = {}) {
   const login = () => call("account/login/start", { type: "chatgptDeviceCode" });
   const limits = () => call("account/rateLimits/read", {});
 
-  async function models() {
-    const rpc = await connect();
-    const result = new Map(), cursors = new Set();
-    let cursor, defaultModel = "";
+  async function pages(rpc, method, params) {
+    const rows = [], seen = new Set();
+    let cursor;
     do {
-      const page = await rpc.request("model/list", { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) });
-      if (!Array.isArray(page?.data)) throw new Error("Codex 返回的模型清单无效");
-      for (const row of page.data) {
-        const id = row?.model || row?.id;
-        if (typeof id !== "string" || !id || row.hidden) continue;
-        result.set(id, { id, label: row.displayName || id });
-        if (row.isDefault) defaultModel = id;
-      }
+      const page = await rpc.request(method, { ...params, ...(cursor ? { cursor } : {}) });
+      if (!Array.isArray(page?.data)) throw new Error("Codex 返回的选项清单无效");
+      rows.push(...page.data);
       cursor = page.nextCursor;
-      if (cursor && cursors.has(cursor)) throw new Error("Codex 模型清单分页重复");
-      if (cursor) cursors.add(cursor);
+      if (cursor && seen.has(cursor)) throw new Error("Codex 选项清单分页重复");
+      if (cursor) seen.add(cursor);
     } while (cursor);
-    if (rpc === transport) defaultModelId = defaultModel;
-    return { models: [...result.values()], defaultModel };
+    return rows;
+  }
+
+  async function readCatalog(rpc, threadId) {
+    const rows = await pages(rpc, "model/list", { limit: 100, includeHidden: false });
+    const entries = new Map();
+    let defaultModel = "";
+    const visible = rows.filter(row => !row?.hidden && typeof (row?.model || row?.id) === "string");
+    const hasTiers = visible.some(row => row.serviceTiers?.length);
+    // The official TUI filters the model's speed tiers by the enabled feature gate.
+    const features = hasTiers ? await pages(rpc, "experimentalFeature/list", { limit: 500, ...(threadId ? { threadId } : {}) }) : [];
+    const enabled = new Set(features.filter(f => f.enabled).map(f => f.name));
+    for (const row of visible) {
+      const id = row.model || row.id;
+      const efforts = (row.supportedReasoningEfforts || []).filter(e => e?.reasoningEffort).map(e => ({
+        id: e.reasoningEffort, label: e.reasoningEffort, description: e.description || "",
+      }));
+      const serviceTiers = (row.serviceTiers || []).filter(t => t?.id &&
+        (t.id === "flex" || enabled.has(t.id === "ultrafast" ? "ultrafast_mode" : "fast_mode")))
+        .map(t => ({ id: t.id, label: t.name || t.id, description: t.description || "" }));
+      if (serviceTiers.length && !serviceTiers.some(t => t.id === "default")) {
+        // Explicit Standard is important for models with a catalog default of Fast.
+        serviceTiers.unshift({ id: "default", label: "标准", description: "" });
+      }
+      entries.set(id, { id, label: row.displayName || id, efforts, serviceTiers,
+        defaultEffort: row.defaultReasoningEffort || "",
+        defaultServiceTier: serviceTiers.some(t => t.id === row.defaultServiceTier) ? row.defaultServiceTier : "" });
+      if (row.isDefault) defaultModel = id;
+    }
+    const catalog = { entries, defaultModel };
+    if (!threadId && rpc === transport) modelCatalog = catalog;
+    return catalog;
+  }
+
+  async function models(modelId = "") {
+    const { entries, defaultModel } = await readCatalog(await connect());
+    const effortModel = modelId || defaultModel;
+    const row = entries.get(effortModel);
+    return { models: [...entries.values()].map(({ id, label }) => ({ id, label })), defaultModel, effortModel,
+      efforts: row?.efforts || [], defaultEffort: row?.defaultEffort || "",
+      serviceTiers: row?.serviceTiers || [], defaultServiceTier: row?.defaultServiceTier || "" };
+  }
+
+  function turnTuning(row, effort, serviceTier) {
+    const overrides = {};
+    if (effort !== undefined) {
+      if (effort !== "" && !row?.efforts.some(e => e.id === effort)) throw new Error("此 Codex 模型不支持所选思考强度");
+      const selected = effort || row?.defaultEffort;
+      if (selected) overrides.effort = selected;
+    }
+    if (serviceTier !== undefined) {
+      if (serviceTier !== "" && !row?.serviceTiers.some(t => t.id === serviceTier)) throw new Error("此 Codex 模型未启用所选服务档位");
+      // Omitting a tier on a resumed thread keeps its previous override.
+      overrides.serviceTier = serviceTier || row?.defaultServiceTier || "default";
+    }
+    return overrides;
   }
 
   function respond(id, allow) {
@@ -164,7 +212,7 @@ export function createCodexClient(options = {}) {
     const p = msg.params || {};
     if (msg.method === "account/rateLimits/updated") return emit(null, { type: "quota", ...p });
     if (msg.method === "account/updated" || msg.method === "account/login/completed") {
-      defaultModelId = undefined;
+      modelCatalog = undefined;
       if (msg.method === "account/login/completed") emit(null, { type: "login", success: p.success, error: p.error ? publicAgentError(p.error, "Codex 登录失败") : null });
       rpc.request("account/read", { refreshToken: false }).then((r) => {
         if (rpc === transport) emit(null, { type: "account", account: r.account });
@@ -189,7 +237,7 @@ export function createCodexClient(options = {}) {
     else handleRunMessage(rpc, run, msg);
   }
 
-  async function execute({ threadId, cwd, text, model, onEvent, signal }, forkConfig) {
+  async function execute({ threadId, cwd, text, model, effort, serviceTier, onEvent, signal }, forkConfig) {
     if (!path.isAbsolute(cwd || "") || typeof text !== "string" || !text.trim()) {
       throw new Error("Codex 需要绝对项目目录和非空消息");
     }
@@ -212,7 +260,8 @@ export function createCodexClient(options = {}) {
         if (state?.account?.type !== "chatgpt") throw new Error("请先用 ChatGPT 账号登录 Codex");
       }
       if (signal?.aborted) throw stopped();
-      if (!forkConfig && threadId && model === "") model = defaultModelId ?? (await models()).defaultModel;
+      const tune = !forkConfig && (effort !== undefined || serviceTier !== undefined);
+      if (!forkConfig && threadId && model === "") model = (modelCatalog || await readCatalog(rpc)).defaultModel;
       if (signal?.aborted) throw stopped();
       const params = threadArgs(cwd, model, !!forkConfig);
       if (threadId) params.threadId = threadId;
@@ -235,6 +284,10 @@ export function createCodexClient(options = {}) {
       if (!id || (method === "thread/fork" && id === threadId)) throw new Error("Codex 没有返回有效的会话");
       if (forkConfig?.provider && reply.modelProvider !== HANDOFF_PROVIDER) throw new Error("Codex 未采用指定的第三方接口");
       if (reply.modelProvider && reply.modelProvider !== params.modelProvider) throw new Error("Codex 返回的模型接口与所选账号不一致");
+      // A project can disable a speed mode. Ask about the loaded thread before applying the UI selection.
+      const catalog = tune ? await readCatalog(rpc, id) : null;
+      const tuning = catalog ? turnTuning(catalog.entries.get(model || reply.model || catalog.defaultModel), effort, serviceTier) : {};
+      if (signal?.aborted) throw stopped();
       run = { threadId: id, rpc, onEvent, signal, summary: !!forkConfig, items: new Map(), early: [], done: deferred() };
       runs.set(id, run);
       reserved.add(id);
@@ -242,7 +295,7 @@ export function createCodexClient(options = {}) {
       if (signal?.aborted) throw stopped();
       signal?.addEventListener("abort", interrupt, { once: true });
       const started = await rpc.request("turn/start", {
-        threadId: id, ...(model ? { model } : {}), input: [{ type: "text", text, text_elements: [] }],
+        threadId: id, ...(model ? { model } : {}), ...tuning, input: [{ type: "text", text, text_elements: [] }],
         ...(forkConfig ? { environments: [] } : {}),
       });
       run.turnId = started?.turn?.id;
