@@ -83,6 +83,7 @@ let reloadProv = async (...a) => { reloadLog.push(a); if (onReload) onReload(); 
 let testAndShow = (id) => { testLog.push(id); };
 let useProvider = () => {};
 let loadModels = async () => {};
+const invalidateProviderCatalog = () => {};
 globalThis.__k = {
   state, box,
   render: (p) => { renderCustomCard(box, p); },

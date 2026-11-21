@@ -34,6 +34,9 @@ public class NativeHandoffPanelTest {
         static String source;
         static JSONArray providers;
         static JSONObject sent;
+        static int modelReads;
+        static String modelPath;
+        static Consumer<JSONObject> models;
 
         @Implementation protected static void call(Activity a, String method, String route, JSONObject body,
                 Consumer<JSONObject> success, Consumer<String> error) {
@@ -42,6 +45,10 @@ public class NativeHandoffPanelTest {
                 JSONObject conversation = NativeHome.json("id", "conversation", "activeAgent", source,
                         "turns", new JSONArray().put(turn));
                 success.accept(NativeHome.json("conversation", conversation, "providers", providers));
+            } else if (route.startsWith("/api/multi/models?")) {
+                modelReads++;
+                modelPath = route;
+                models = success;
             } else if (route.equals("/api/multi/preferences")) {
                 success.accept(NativeHome.json("agent", "codex", "provider", "chatgpt", "model", "codex-test"));
             } else {
@@ -57,6 +64,8 @@ public class NativeHandoffPanelTest {
         Gateway.source = "claude";
         Gateway.providers = new JSONArray().put(provider("a")).put(provider("b"));
         Gateway.sent = null;
+        Gateway.modelReads = 0;
+        Gateway.models = null;
         MainActivity host = Robolectric.buildActivity(MainActivity.class).get();
         host.setTheme(NativeAppearance.theme(host));
         home = new NativeHome(host, () -> {});
@@ -103,6 +112,34 @@ public class NativeHandoffPanelTest {
         assertEquals("custom-b", Gateway.sent.optString("model"));
         assertEquals("chatgpt", Gateway.sent.optString("destinationProvider"));
         assertEquals("继续开发", Gateway.sent.optString("text"));
+    }
+
+    @Test public void handoffDiscoversModelsOnDemandAndKeepsNewerTypedInput() {
+        choose("自动交接", "第三方接口");
+        EditText model = (EditText) find(home.root, "default-a");
+        assertNotNull(model);
+        home.chat.refreshSelection();
+        assertEquals(0, Gateway.modelReads);
+        JSONObject catalog = NativeHome.json("models", new JSONArray().put(NativeHome.json("id", "remote-a", "label", "Remote A")));
+        tap(home.root, "选择交接模型");
+        assertEquals("/api/multi/models?agent=claude&provider=a&refresh=1", Gateway.modelPath);
+        model.setText("typed-after-request");
+        Gateway.models.accept(catalog);
+        assertEquals("typed-after-request", model.getText().toString());
+        assertFalse(sheet().isShowing());
+        home.chat.refreshSelection();
+        assertEquals(1, Gateway.modelReads);
+        tap(home.root, "选择交接模型");
+        Gateway.models.accept(catalog);
+        tap(sheet().getWindow().getDecorView(), "Remote A");
+        settle();
+        home.chat.refreshSelection();
+        assertEquals("remote-a", model.getText().toString());
+        home.share("交接");
+        tap(home.root, "发送");
+        assertEquals("a", Gateway.sent.optString("provider"));
+        assertEquals("remote-a", Gateway.sent.optString("model"));
+        assertEquals(2, Gateway.modelReads);
     }
 
     @Test public void manualAgyHandoffCanBeCancelledAndSendsOnlyConfirmedTurns() {

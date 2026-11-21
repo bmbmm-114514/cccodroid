@@ -1,6 +1,8 @@
 // ko dictionary: Chinese source text (the key) → ko.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT["ko"] = {
+  "添加并获取模型": "추가하고 모델 가져오기",
+  "请先保存接口修改，再刷新模型清单。": "모델 목록을 새로 고치기 전에 엔드포인트 변경 사항을 저장하세요.",
   "会话": "세션",
   "设置": "설정",
   "能力": "기능",

@@ -528,7 +528,12 @@
         <option value="bearer" ${v.authStyle !== "x-api-key" ? "selected" : ""}>${t("认证：Authorization: Bearer（多数第三方）")}</option>
         <option value="x-api-key" ${v.authStyle === "x-api-key" ? "selected" : ""}>${t("认证：x-api-key（Anthropic 风格）")}</option>
       </select>
-      <input id="cc-model" placeholder="${t("默认模型名（必填，claude 不认识第三方模型）")}" value="${esc(v.defaultModel || "")}">
+      ${p ? `<label for="cc-catalog">${esc(t("模型清单"))}</label>
+        <div class="row-actions"><select id="cc-catalog" data-native disabled><option value="">${esc(t("选择"))}</option></select>
+        <button class="btn sm ghost" data-act="catalog">${esc(t("刷新"))}</button></div>
+        <div class="tiny" id="cc-catalog-status" role="status"></div>` : ""}
+      <label for="cc-model">${esc(t("默认模型"))}</label>
+      <input id="cc-model" placeholder="${t("模型名称")}" value="${esc(v.defaultModel || "")}">
       <input id="cc-fast" placeholder="${t("快模型名（选填，子代理用；留空同上）")}" value="${esc(v.fastModel || "")}">
       <input id="cc-models" placeholder="${t("模型清单地址（选填；不填会按接口地址自动查找 /models）")}" value="${esc(v.modelsUrl || "")}">
       <input id="cc-ctx" inputmode="numeric" placeholder="${t("上下文窗口（选填，token 数，1k=1024；不填按 200k 算）")}" value="${v.contextWindow ? esc(String(v.contextWindow)) : ""}">
@@ -538,7 +543,7 @@
       <label class="tiny" style="display:flex;gap:6px;align-items:flex-start"><input id="cc-inline" type="checkbox" style="width:auto;margin:2px 0 0"${v.inlineImages ? " checked" : ""}>
         <span>${t("图片随消息一起发（兼容）：模型看不懂附图、照着乱编时再勾。有的第三方调用方式认不出 Read 读回来的图，勾上后附图会另带一份直接放进消息里。")}</span></label>
       <div class="row-actions">
-        <button class="btn sm" data-act="save">${p ? t("保存") : t("添加")}</button>
+        <button class="btn sm" data-act="save">${p ? t("保存") : t("添加并获取模型")}</button>
         ${p ? `<button class="btn sm ghost" data-act="test">${t("测试")}</button>
                ${p.hasKey ? `<button class="btn sm ghost danger" data-act="clear">${t("清除 Key")}</button>` : ""}
                <button class="btn sm ghost danger" data-act="del">${t("删除")}</button>${useBtn(p)}` : ""}
@@ -560,9 +565,18 @@ your-cheap-model 128k
 Context window: 200k (optional; only if the provider doesn't report one)</pre>
         <div class="tiny">${t("第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。")}</div>
       </details>`;
+    const catalog = $("cc-catalog");
+    if (catalog && p?.hasKey) fillProviderModelChoices(p.id, catalog, $("cc-model"), $("cc-catalog-status"));
     box.onclick = async (e) => {
       const act = e.target.dataset && e.target.dataset.act;
       if (!act) return;
+      if (act === "catalog") {
+        if ($("cc-base").value.trim() !== p.baseUrl || $("cc-auth").value !== (p.authStyle || "bearer") ||
+            $("cc-models").value.trim() !== (p.modelsUrl || "") || $("pc-key").value.trim()) {
+          return toast(t("请先保存接口修改，再刷新模型清单。"), true);
+        }
+        return fillProviderModelChoices(p.id, catalog, $("cc-model"), $("cc-catalog-status"), true);
+      }
       if (act === "use") return useProvider(p);
       if (act === "test") return testAndShow(p.id);
       // 这张卡属于哪一家、还是不是刚才那一份 DOM：await 回来的旧回执只许动仍在原卡上的视图（BUG-UIFS-004）
@@ -575,6 +589,7 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
         let r;
         try { r = await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
         if (r && r.ok === false) return toast(t("清除失败：{msg}", { msg: r.message || "?" }), true);
+        invalidateProviderCatalog(p.id);
         if (!live()) return toast(t("已清除"));
         return reloadProv(t("已清除"));
       }
@@ -583,6 +598,7 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
         let r;
         try { r = await post("/api/providers/delete", { id: p.id }); } catch (e2) { return toast(e2.message, true); }
         if (r && r.ok === false) return toast(t("删除失败：{msg}", { msg: r.message || "?" }), true);
+        invalidateProviderCatalog(p.id);
         const wasActive = state.providerActive === p.id;
         state.provView = wasActive ? null : state.providerActive;
         await reloadProv(t("已删除"));
@@ -596,7 +612,6 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
         authStyle: $("cc-auth").value, defaultModel: $("cc-model").value.trim(), fastModel: $("cc-fast").value.trim(),
         modelsUrl: $("cc-models").value.trim(), apiKey: $("pc-key").value.trim(), inlineImages: $("cc-inline").checked,
       };
-      if (!body.defaultModel) return toast(t("默认模型名必填"), true);
       // 上下文窗口：k / m 按二进制（1k=1024、1m=1048576），与型号面板的显示口径一致（#222）；清单不报窗口时默认/快模型按它算（#67）
       const cw = $("cc-ctx").value.trim().replace(/[,_]/g, "").replace(/^0+(?:\.0+)?$/, ""), cm = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(cw);
       body.contextWindow = cw ? (cm ? Math.round(Number(cm[1]) * ({ k: 1024, m: 1048576 }[cm[2].toLowerCase()] || 1)) : -1) : 0;
@@ -615,15 +630,16 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
       }
       let r;
       try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
+      invalidateProviderCatalog(r.id);
       // 换了主机又没给新 Key：网关把旧 Key 清掉了，得说清楚、让用户重新填（0.6.9 审计 P1-2）
       const done = p ? t("已保存") : t("已添加");
       // 远程明文 http：只警告不拦，保存回执带 warning 就跟在「已保存」后面说（199-9-02）
       const msg = r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : r.warning ? done + " · " + r.warning : done;
       // 卡已切走：迟到的回执只报保存结果，别把视图切回来重画当前卡（BUG-UIFS-004）
       if (!live()) return toast(msg);
-      if (keyEl.value.trim() !== body.apiKey) return toast(msg);   // 同卡提交后又敲了新 Key：留着，别重画掉
+      if (keyEl.value.trim() !== body.apiKey || $("cc-model").value.trim() !== body.defaultModel) return toast(msg);   // 同卡提交后又敲了新 Key：留着，别重画掉
       state.provView = r.id;
-      await reloadProv(msg, true);
+      await reloadProv(msg);
     };
   }
 

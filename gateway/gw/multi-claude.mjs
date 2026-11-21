@@ -27,10 +27,10 @@ export function claudeProviders() {
     .map(({ id, label, defaultModel }) => ({ id, label, defaultModel }));
 }
 
-export async function claudeModels(requested = "", id = OFFICIAL) {
+export async function claudeModels(requested = "", id = OFFICIAL, refresh = false) {
   const provider = id === OFFICIAL ? subscription() : providerById(id);
   if (!provider) throw new Error("未知的 Claude 接口");
-  const list = await fetchModels(false, provider);
+  const list = await fetchModels(refresh, provider, { guess: true, reportErrors: true });
   const defaultModel = provider.defaultModel || "", effortModel = requested || defaultModel;
   const meta = list.find(m => m.id === effortModel) || (!effortModel && list[0]) || {};
   return { models: list.map(m => ({id:m.id,label:m.name || m.id})), defaultModel, effortModel,

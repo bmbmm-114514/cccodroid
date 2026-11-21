@@ -1,6 +1,8 @@
 // zh-Hant dictionary: Chinese source text (the key) → zh-Hant.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT["zh-Hant"] = {
+  "添加并获取模型": "新增並取得模型",
+  "请先保存接口修改，再刷新模型清单。": "請先儲存介面修改，再重新整理模型清單。",
   "会话": "會話",
   "设置": "設定",
   "能力": "能力",

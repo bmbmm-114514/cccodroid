@@ -1,6 +1,8 @@
 // ja dictionary: Chinese source text (the key) → ja.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT["ja"] = {
+  "添加并获取模型": "追加してモデルを取得",
+  "请先保存接口修改，再刷新模型清单。": "接続先の変更を保存してからモデル一覧を更新してください。",
   "会话": "セッション",
   "设置": "設定",
   "能力": "機能",

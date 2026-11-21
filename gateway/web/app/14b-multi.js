@@ -171,6 +171,11 @@
     const mode = $("ma-mode").value;
     $("ma-manual").classList.toggle("hidden", !switching || mode !== "manual");
     $("ma-third").classList.toggle("hidden", !switching || mode !== "third-party");
+    if (switching && mode === "third-party" && multi.keys.handoffCatalog !== $("ma-provider").value) {
+      const id = multi.keys.handoffCatalog = $("ma-provider").value;
+      $("ma-catalog-refresh").disabled = !id;
+      fillProviderModelChoices(id, $("ma-catalog"), $("ma-model"), $("ma-catalog-status"));
+    }
     if (switching && mode === "third-party") $("ma-third-scope").textContent = source === "agy"
       ? t("所选接口将接收本对话的可见记录。") : t("所选接口将接收原会话可恢复的历史。");
     const alerts = [];
@@ -259,7 +264,12 @@
   }
   function multiStop() { if (multi.id && multiBusy()) return multiAction(() => post("/api/multi/stop", {id:multi.id})); }
   $("ma-mode").addEventListener("change", () => { if ($("ma-mode").value === "manual") $("ma-manual").open = true; multiPaintControls(); });
-  $("ma-provider").addEventListener("change", () => { $("ma-model").value = multi.data?.providers?.find(p => p.id === $("ma-provider").value)?.model || ""; });
+  $("ma-provider").addEventListener("change", () => {
+    $("ma-model").value = multi.data?.providers?.find(p => p.id === $("ma-provider").value)?.model || "";
+    multiPaintControls();
+  });
+  $("ma-catalog-refresh").addEventListener("click", () =>
+    fillProviderModelChoices($("ma-provider").value, $("ma-catalog"), $("ma-model"), $("ma-catalog-status"), true));
   $("ma-approvals").addEventListener("click", e => { const b=e.target.closest("[data-approval]"); if (b) multiAction(() => post("/api/multi/approve", { id:multi.id, approvalId:b.dataset.approval, allow:b.dataset.allow === "1" })); });
   $("ma-turns").addEventListener("click", e => {
     const id = e.target.closest("[data-retry-turn]")?.dataset.retryTurn;

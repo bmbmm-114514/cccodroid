@@ -1,6 +1,8 @@
 // ru dictionary: Chinese source text (the key) → ru.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT["ru"] = {
+  "添加并获取模型": "Добавить и загрузить модели",
+  "请先保存接口修改，再刷新模型清单。": "Сохраните изменения адреса подключения перед обновлением списка моделей.",
   "会话": "Сеансы",
   "设置": "Настройки",
   "能力": "Возможности",

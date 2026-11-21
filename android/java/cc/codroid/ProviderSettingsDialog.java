@@ -67,6 +67,7 @@ public final class ProviderSettingsDialog {
         final int officialType;
         boolean hasKey;
         boolean local;
+        boolean custom;
         final String defaultModel;
         JSONObject capabilities;
         String capabilitiesModel;
@@ -164,6 +165,7 @@ public final class ProviderSettingsDialog {
     private LinearLayout cardModel;
     private Button btnCustomModel;
     private Button retryCapabilities;
+    private TextView catalogError;
     private ProgressBar modelProgress;
     private TextView modelChevron;
     private final Runnable showModelProgress = () -> {
@@ -269,6 +271,10 @@ public final class ProviderSettingsDialog {
     }
 
     private void openQuickProvider(List<ProviderItem> available, ProviderItem item) {
+        openQuickProvider(available, item, false);
+    }
+
+    private void openQuickProvider(List<ProviderItem> available, ProviderItem item, boolean refresh) {
         if (item == null || quickSaving || quickRefreshing || isDismissed) return;
         boolean samePreview = quickProvider != null && quickProvider.entryKey.equals(item.entryKey);
         quickProvider = item;
@@ -284,23 +290,28 @@ public final class ProviderSettingsDialog {
         item.quickReading = true;
         final int gen = generation;
         Runnable retry = () -> {
-            if (!stale(gen) && quickProvider == item) openQuickProvider(available, item);
+            if (!stale(gen) && quickProvider == item) openQuickProvider(available, item, item.custom);
         };
         if (item.quickSavedModel != null) {
-            readQuickModels(gen, item, item.quickSavedModel, retry);
+            readQuickModels(gen, item, item.quickSavedModel, refresh, retry);
             return;
         }
         NativeRequests.call(host, "GET", "/api/multi/preferences?provider=" + Uri.encode(item.providerId), null, saved -> {
-            if (!stale(gen)) readQuickModels(gen, item, saved.optString("model"), retry);
+            if (!stale(gen)) readQuickModels(gen, item, saved.optString("model"), refresh, retry);
         }, error -> quickReadFailed(gen, item, null, error, retry));
     }
 
-    private void readQuickModels(int gen, ProviderItem item, String model, Runnable retry) {
+    private void readQuickModels(int gen, ProviderItem item, String model, boolean refresh, Runnable retry) {
         item.quickSavedModel = model;
-        NativeRequests.call(host, "GET", modelPath(item, model), null, catalog -> {
+        NativeRequests.call(host, "GET", modelPath(item, model, refresh), null, catalog -> {
             if (stale(gen)) return;
             item.quickReading = false;
-            item.quickChoices = options(catalog.optJSONArray("models"), model, catalog.optString("defaultModel", item.defaultModel), true);
+            JSONArray entries = catalog.optJSONArray("models");
+            if (item.custom && (entries == null || entries.length() == 0)) {
+                quickReadFailed(gen, item, model, "接口未返回模型，可重试或在设置中输入模型 ID", retry);
+                return;
+            }
+            item.quickChoices = options(entries, model, catalog.optString("defaultModel", item.defaultModel), true);
             if (quickProvider == item) quickModels(item, model, item.quickChoices);
         }, error -> quickReadFailed(gen, item, model, error, retry));
     }
@@ -350,9 +361,9 @@ public final class ProviderSettingsDialog {
         });
     }
 
-    private String modelPath(ProviderItem p, String model) {
+    private String modelPath(ProviderItem p, String model, boolean refresh) {
         return "/api/multi/models?agent=" + Uri.encode(p.agent) + "&model=" + Uri.encode(model)
-                + "&provider=" + Uri.encode(p.providerId);
+                + "&provider=" + Uri.encode(p.providerId) + (refresh ? "&refresh=1" : "");
     }
 
     private void present() {
@@ -528,9 +539,13 @@ public final class ProviderSettingsDialog {
         btnCustomModel = action("输入自定义模型");
         btnCustomModel.setOnClickListener(v -> showCustomModelDialog());
         cardModel.addView(btnCustomModel);
+        catalogError = bodyLabel("");
+        catalogError.setVisibility(View.GONE);
+        catalogError.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        cardModel.addView(catalogError);
         retryCapabilities = action("模型列表未能更新 · 重试");
         retryCapabilities.setVisibility(View.GONE);
-        retryCapabilities.setOnClickListener(v -> loadCapabilities());
+        retryCapabilities.setOnClickListener(v -> loadCapabilities(currentItem != null && currentItem.custom));
         cardModel.addView(retryCapabilities);
         group(scrollContent, "模型偏好", cardModel);
         group(scrollContent, "第三方接口", customGroup);
@@ -930,35 +945,41 @@ public final class ProviderSettingsDialog {
 
     private void showAddCustomProviderDialog() {
         AlertDialog.Builder b = new MaterialAlertDialogBuilder(ui);
-        b.setTitle("添加自定义厂商");
+        b.setTitle("添加自定义接口");
 
         LinearLayout layout = new LinearLayout(ui);
         layout.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(16);
         layout.setPadding(pad, pad, pad, pad);
 
-        EditText etLabel = createStyledEditText("厂商名称 (例如: DeepSeek)", false);
+        EditText etLabel = createStyledEditText("接口名称（选填）", false);
         layout.addView(etLabel);
 
-        EditText etBaseUrl = createStyledEditText("接口地址 (例如: https://api.deepseek.com/v1)", false);
+        EditText etBaseUrl = createStyledEditText("Base URL（兼容 New API）", false);
+        etBaseUrl.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         layout.addView(etBaseUrl);
 
         EditText etKey = createStyledEditText("API 密钥 (API Key)", true);
         layout.addView(etKey);
 
         b.setView(layout);
-        b.setPositiveButton("保存并选择", (d, which) -> {
+        b.setPositiveButton("保存并选择", null);
+        b.setNegativeButton("取消", null);
+        AlertDialog form = b.show();
+        child = form;
+        form.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String label = etLabel.getText().toString().trim();
             String baseUrl = etBaseUrl.getText().toString().trim();
             String apiKey = etKey.getText().toString().trim();
-            if (TextUtils.isEmpty(label)) {
-                Toast.makeText(host, "厂商名称不能为空", Toast.LENGTH_SHORT).show();
+            Uri uri = Uri.parse(baseUrl);
+            if (TextUtils.isEmpty(uri.getHost()) || !("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))) {
+                etBaseUrl.setError("请输入完整的 https:// 或 http:// 地址");
+                etBaseUrl.requestFocus();
                 return;
             }
-            saveNewCustomProvider(label, baseUrl, apiKey);
+            form.dismiss();
+            saveNewCustomProvider(label.isEmpty() ? uri.getHost() : label, baseUrl, apiKey);
         });
-        b.setNegativeButton("取消", null);
-        child = b.show();
     }
 
     private void showCustomModelDialog() {
@@ -1025,7 +1046,7 @@ public final class ProviderSettingsDialog {
     }
 
     private void parseInitialData(String prefJson, String provJson) {
-        selectProviderInternal(readProviderCatalog(prefJson, provJson), false);
+        selectProviderInternal(readProviderCatalog(prefJson, provJson), false, false);
     }
 
     private ProviderItem readProviderCatalog(String prefJson, String provJson) {
@@ -1055,8 +1076,9 @@ public final class ProviderSettingsDialog {
 
                     String label = p.optString("label", id);
                     boolean hasKey = p.optBoolean("hasKey", false);
-                    String defModel = p.optString("defaultModel", "");
+                    String defModel = p.isNull("defaultModel") ? "" : p.optString("defaultModel");
                     ProviderItem item = new ProviderItem("api:" + id, label, "claude", id, false, 0, hasKey, defModel);
+                    item.custom = p.optBoolean("custom");
                     item.local = p.optBoolean("local");
                     providerList.add(item);
                 }
@@ -1098,10 +1120,10 @@ public final class ProviderSettingsDialog {
 
     private void selectProvider(ProviderItem item) {
         if (item == null) return;
-        selectProviderInternal(item, true);
+        selectProviderInternal(item, true, false);
     }
 
-    private void selectProviderInternal(ProviderItem item, boolean sendPreference) {
+    private void selectProviderInternal(ProviderItem item, boolean sendPreference, boolean refreshModels) {
         if (item == null) return;
         final int gen = ++generation;
         setModelControlsEnabled(false);
@@ -1110,6 +1132,7 @@ public final class ProviderSettingsDialog {
         btnSaveKey.setEnabled(true);
         btnSubmitManualCode.setEnabled(true);
         currentItem = item;
+        catalogError.setVisibility(View.GONE);
         btnPicker.setText(item.isOfficial ? "选择 API 接口" : item.label);
         renderProviderRows();
         stopPolling();
@@ -1164,7 +1187,7 @@ public final class ProviderSettingsDialog {
                         curModel = model;
                         curEffort = effort;
                         curServiceTier = tier;
-                        loadCapabilities();
+                        loadCapabilities(refreshModels);
                     });
                 } catch (Exception e) {
                     mainHandler.post(() -> {
@@ -1595,7 +1618,9 @@ public final class ProviderSettingsDialog {
         btnCustomModel.setEnabled(enabled);
     }
 
-    private void loadCapabilities() {
+    private void loadCapabilities() { loadCapabilities(false); }
+
+    private void loadCapabilities(boolean refresh) {
         if (currentItem == null) return;
         final int gen = generation;
         final int read = ++modelRead;
@@ -1606,21 +1631,32 @@ public final class ProviderSettingsDialog {
             bindCapabilities(item.capabilities);
             setModelControlsEnabled(true);
         }
+        catalogError.setVisibility(View.GONE);
+        if (item.custom) {
+            retryCapabilities.setText("刷新模型列表");
+            retryCapabilities.setVisibility(View.VISIBLE);
+        }
         retryCapabilities.setEnabled(false);
         // Keep the last layout on screen until the selected provider's catalog is ready.
         // Reads can overlap. Preference writes remain ordered on the single writer.
-        Runnable failed = () -> {
+        Consumer<String> failed = message -> {
             if (stale(gen) || read != modelRead || !model.equals(curModel)) return;
+            retryCapabilities.setText("模型列表未能更新 · 重试");
+            if (item.custom && !TextUtils.isEmpty(message)) {
+                catalogError.setText(message);
+                catalogError.setVisibility(View.VISIBLE);
+            }
             if (!cached) bindFallbackCapabilities();
             cardModel.setVisibility(View.VISIBLE);
             setModelControlsEnabled(true);
             retryCapabilities.setEnabled(true);
             retryCapabilities.setVisibility(View.VISIBLE);
         };
-        NativeRequests.call(host, "GET", modelPath(item, model), null, result -> {
+        String path = modelPath(item, model, refresh);
+        NativeRequests.call(host, "GET", path, null, result -> {
             if (stale(gen) || read != modelRead || !model.equals(curModel)) return;
             if (result.has("ok") && !result.optBoolean("ok")) {
-                failed.run();
+                failed.accept(result.optString("message"));
                 return;
             }
             item.capabilitiesModel = model;
@@ -1628,8 +1664,10 @@ public final class ProviderSettingsDialog {
             bindCapabilities(result);
             setModelControlsEnabled(true);
             cardModel.setVisibility(View.VISIBLE);
-            retryCapabilities.setVisibility(View.GONE);
-        }, error -> failed.run());
+            if (refresh) hasChanges = true;
+            retryCapabilities.setEnabled(true);
+            retryCapabilities.setVisibility(item.custom ? View.VISIBLE : View.GONE);
+        }, failed);
     }
 
     private void bindCapabilities(JSONObject obj) {
@@ -1727,7 +1765,7 @@ public final class ProviderSettingsDialog {
                     target.hasKey = true;
                     target.capabilities = null;
                     setModelControlsEnabled(false);
-                    loadCapabilities();
+                    loadCapabilities(target.custom);
                     tvKeyStatus.setText("已配置 API 密钥");
                     etApiKey.setText("");
                     Toast.makeText(host, "密钥已保存", Toast.LENGTH_SHORT).show();
@@ -1752,6 +1790,7 @@ public final class ProviderSettingsDialog {
                 JSONObject b = new JSONObject();
                 b.put("label", label);
                 b.put("baseUrl", baseUrl);
+                b.put("authStyle", "bearer");
                 if (!TextUtils.isEmpty(apiKey)) {
                     b.put("apiKey", apiKey);
                 }
@@ -1771,12 +1810,13 @@ public final class ProviderSettingsDialog {
                         ""
                 );
 
+                newItem.custom = true;
                 mainHandler.post(() -> {
                     hasChanges = true;
                     if (stale(gen)) return;
                     progressBar.setVisibility(View.INVISIBLE);
                     providerList.add(newItem);
-                    selectProvider(newItem);
+                    selectProviderInternal(newItem, true, newItem.hasKey);
                     Toast.makeText(host, "已添加并切换至 " + label, Toast.LENGTH_SHORT).show();
                 });
             } catch (Exception e) {

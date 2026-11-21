@@ -1,6 +1,8 @@
 // ar dictionary: Chinese source text (the key) → ar.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT["ar"] = {
+  "添加并获取模型": "إضافة وجلب النماذج",
+  "请先保存接口修改，再刷新模型清单。": "احفظ تغييرات نقطة الاتصال قبل تحديث قائمة النماذج.",
   "会话": "الجلسات",
   "设置": "الإعدادات",
   "能力": "القدرات",

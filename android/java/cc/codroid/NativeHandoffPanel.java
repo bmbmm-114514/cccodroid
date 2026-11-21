@@ -1,6 +1,8 @@
 package cc.codroid;
 
+import android.app.Activity;
 import android.content.Context;
+import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -16,6 +18,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -24,6 +27,7 @@ import org.json.JSONObject;
 final class NativeHandoffPanel {
     private static final List<String> MODE_IDS = Arrays.asList("outgoing", "manual", "third-party");
     private static final List<String> MODE_NAMES = Arrays.asList("自动交接", "手动选择", "第三方接口");
+    private final Activity host;
     private final Context ui;
     private final Function<String,String> agentName;
     private final LinearLayout card;
@@ -37,9 +41,11 @@ final class NativeHandoffPanel {
     private final Set<String> selected = new HashSet<>();
     private String source = "", provider = "", preferredMode = "outgoing";
     private boolean disposed;
+    private int modelRead;
     private BottomSheetDialog sheet;
 
-    NativeHandoffPanel(LinearLayout parent, Function<String,String> agentName) {
+    NativeHandoffPanel(Activity host, LinearLayout parent, Function<String,String> agentName) {
+        this.host = host;
         ui = parent.getContext();
         this.agentName = agentName;
         card = new LinearLayout(ui);
@@ -70,6 +76,10 @@ final class NativeHandoffPanel {
         model.setSingleLine(true);
         model.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN);
         modelField.addView(model, -1, -2);
+        modelField.setEndIconMode(TextInputLayout.END_ICON_CUSTOM);
+        modelField.setEndIconDrawable(PixelUi.drawable(ui, "expand"));
+        modelField.setEndIconContentDescription("选择交接模型");
+        modelField.setEndIconOnClickListener(v -> chooseModel());
         updateMode();
     }
 
@@ -136,6 +146,9 @@ final class NativeHandoffPanel {
     private void selectProvider(JSONObject item) {
         String id = item.optString("id");
         if (!provider.equals(id)) {
+            ++modelRead;
+            modelField.setError(null);
+            modelField.setEndIconVisible(true);
             provider = id;
             model.setText(item.optString("model"));
         }
@@ -162,6 +175,41 @@ final class NativeHandoffPanel {
             JSONObject choice = findProvider(ids.get(which));
             if (!disposed && choice != null) selectProvider(choice);
         }, null);
+    }
+
+    private void chooseModel() {
+        String id = provider();
+        if (id.isEmpty()) return;
+        final int read = ++modelRead;
+        String typed = model.getText().toString();
+        String path = "/api/multi/models?agent=claude&provider=" + Uri.encode(id) + "&refresh=1";
+        modelField.setError(null);
+        modelField.setEndIconVisible(false);
+        Consumer<String> failed = message -> {
+            if (disposed || read != modelRead) return;
+            modelField.setEndIconVisible(true);
+            if (!id.equals(provider()) || !"third-party".equals(mode()) || !typed.contentEquals(model.getText())) return;
+            modelField.setError(message == null || message.isEmpty() ? "无法获取模型列表，可以手动输入模型 ID" : message);
+        };
+        NativeRequests.call(host, "GET", path, null, result -> {
+            if (disposed || read != modelRead) return;
+            modelField.setEndIconVisible(true);
+            if (!"third-party".equals(mode()) || !id.equals(provider()) || !typed.contentEquals(model.getText()) || card.getVisibility() != View.VISIBLE) return;
+            JSONArray entries = result.optJSONArray("models");
+            List<String> ids = new ArrayList<>(), labels = new ArrayList<>();
+            for (int i = 0; entries != null && i < entries.length(); i++) {
+                JSONObject entry = entries.optJSONObject(i);
+                if (entry == null) continue;
+                String modelId = entry.optString("id");
+                if (modelId.isEmpty()) continue;
+                ids.add(modelId);
+                labels.add(entry.optString("label", modelId));
+            }
+            if (ids.isEmpty()) { failed.accept("接口未返回模型，可以手动输入模型 ID"); return; }
+            sheet = PixelChoiceSheet.show(ui, "选择交接模型", labels, ids.indexOf(typed.trim()), which -> {
+                if (!disposed && read == modelRead && id.equals(provider())) model.setText(ids.get(which));
+            }, null);
+        }, failed);
     }
 
     String provider() { return findProvider(provider) == null ? "" : provider; }

@@ -642,8 +642,12 @@ export function upsertProvider(id, b, prepare) {
   for (const k of ["endpoint", "defaultModel", "fastModel"]) if (k in b) { if (str(b[k])) cur[k] = str(b[k]); else delete cur[k]; }
   if (!PRESETS[id]) {
     for (const k of ["label", "baseUrl", "modelsUrl"]) if (k in b) cur[k] = str(b[k]);
-    if ("authStyle" in b) cur.authStyle = b.authStyle === "x-api-key" ? "x-api-key" : "bearer";
-    cur.modelsAuth = cur.authStyle || "bearer";
+    if ("authStyle" in b) {
+      const style = b.authStyle === "x-api-key" ? "x-api-key" : "bearer";
+      if (style !== (cur.authStyle || "bearer")) cur.modelsAuth = style;
+      cur.authStyle = style;
+    }
+    cur.modelsAuth ||= cur.authStyle || "bearer";
     // 上下文窗口（自己声明）：上游清单不报窗口、或者根本没清单时，默认/快速模型就按它算（#67）
     if ("contextWindow" in b) {
       const n = Number(b.contextWindow);
@@ -1111,6 +1115,8 @@ export function providerBrief() {
 }
 /** 这一家的密钥：生效的那家用已解析好的 API_KEY，别家现取（同样的回落规则，见 loadApiKey） */
 export function keyOf(p) {
+  // 自定义接口只用这份配置绑定的钥匙；同一 id 改过地址或密钥时，旧请求不会拿到新凭据。
+  if (p?.custom) return p.endpointLost ? null : String(p.apiKey || "").trim() || null;
   if (!p || p === PROVIDER || p.id === PROVIDER.id) return API_KEY;
   return loadApiKey(p);
 }

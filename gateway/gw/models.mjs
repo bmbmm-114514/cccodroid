@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { CFG, PATHS, log } from "./config.mjs";
 import { isObj, loadState, saveState } from "./statefile.mjs";
@@ -19,7 +20,11 @@ const CACHE = new Map();   // 厂商 id → { list, at, sig }
 const SIGS = new WeakMap();
 function sigOf(p) {
   let s = SIGS.get(p);
-  if (s === undefined) { s = JSON.stringify([p.id, p.baseUrl, p.modelsUrl, p.modelsAuth, p.defaultModel, p.fastModel, p.contextWindow, p.fallbackModels, p.extraModels]); SIGS.set(p, s); }
+  if (s === undefined) {
+    const credential = p.custom && p.apiKey ? createHash("sha256").update(String(p.apiKey)).digest("hex") : "";
+    s = JSON.stringify([p.id, credential, p.baseUrl, p.modelsUrl, p.modelsAuth, p.defaultModel, p.fastModel, p.contextWindow, p.fallbackModels, p.extraModels]);
+    SIGS.set(p, s);
+  }
   return s;
 }
 
@@ -283,19 +288,19 @@ function withCatalog(list, p) {
 // 清空 / 让它过期：别的模块改不了这几个变量（ES 模块的导入是只读的），走这两个函数
 // 代次：接口配置一改就加一。改之前发出去、改之后才回来的清单请求只交给当时的调用方，不再写回缓存（#77）
 let CACHE_GEN = 0, REQ_SEQ = 0;
-export function dropModelCache() { CACHE_GEN++; MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); }
+export function dropModelCache() { CACHE_GEN++; MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); GUESSED.clear(); }
 export function expireModelCache() { CACHE_GEN++; MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; }   // 在途的旧结果别把过期的又续上（复核 L1）
 
 /** p：哪家（缺省 = 全局生效的）。按家各缓存 10 分钟；全局那家的结果同时放进 MODELS。
  *  guess：自定义端口没填清单地址时去猜 /models。只在用户打开清单（面板、/model）时猜：开跑前要等清单，
  *  连不上的端口逐个试要白等好几个 15 秒 */
-export async function fetchModels(force, p = PROVIDER, { guess = false } = {}) {
-  const gen = CACHE_GEN, list = await fetchModelsOf(p, force, guess);
+export async function fetchModels(force, p = PROVIDER, { guess = false, reportErrors = false } = {}) {
+  const gen = CACHE_GEN, list = await fetchModelsOf(p, force, guess, reportErrors && p.custom);
   // 全局那份跟着按家缓存走：并发刷新时缓存里留的是后发起的那次（见 keep），这里不按完成顺序另写一份
   if (gen === CACHE_GEN && p.id === PROVIDER.id) { const c = CACHE.get(p.id); MODELS = c && c.sig === sigOf(p) ? c.list : list; MODELS_AT = Date.now(); MODELS_FOR = sigOf(p); }
   return list;
 }
-async function fetchModelsOf(p, force, guess) {
+async function fetchModelsOf(p, force, guess, reportErrors) {
   const sig = sigOf(p), c0 = CACHE.get(p.id), c = c0 && c0.sig === sig ? c0 : null, gen = CACHE_GEN, seq = ++REQ_SEQ;
   // 同一配置两次刷新重叠、先发的后回来：不许盖掉后发的结果（#102 04-002）
   const keep = (list, ttl = true) => {
@@ -316,54 +321,87 @@ async function fetchModelsOf(p, force, guess) {
   }
 
   const key = keyOf(p);
-  // 一次拉取：头按 modelsAuth 配；拉到像样的清单返回 list，否则 null（失败原因记日志）
-  const pull = async (url) => {
-    try {
-      const headers = {};
-      if (key) {
-        if (p.modelsAuth === "x-api-key") {
-          headers["x-api-key"] = key;
-          headers["anthropic-version"] = "2023-06-01";
-        } else if (p.modelsAuth !== "none") {
-          headers.Authorization = `Bearer ${key}`;
-        }
-      }
-      const r = await fetchKeyed(url, { headers, signal: AbortSignal.timeout(15000) });
-      if (r.ok) {
-        const list = withCatalog(withConfigured(mergeKnown(normalizeModels(await morePages(url, headers, await fetchJsonCapped(r))), p.fallbackModels), p), p);
-        if (list.length) {
-          log(`[${p.id}] 模型清单：${list.map((m) => m.id).join(", ")}`);
-          return list;
-        }
-      }
-      log(`[${p.id}] 拉模型清单失败 HTTP ${r.status}${url !== p.modelsUrl ? `（试 ${url}）` : ""}`);
-    } catch (e) {
-      log(`[${p.id}] 拉模型清单出错: ${e.message}${url !== p.modelsUrl ? `（试 ${url}）` : ""}`);
-    }
+  let failure;
+  const failed = (message, status = 502, upstreamStatus) => {
+    failure = Object.assign(new Error(message), { code: "model_catalog_unavailable", status, upstreamStatus });
+    log(`[${p.id}] ${message}`);
     return null;
   };
-  // 不带密钥（modelsAuth:"none"）也一样要过 modelsUrlOk：配置能分享导入，不能让它拿网关当跳板，每轮去敲内网地址（v0513b 中-2）
+  const signal = AbortSignal.timeout(15000);
+  const pull = async (url) => {
+    const headers = {};
+    if (key && p.modelsAuth === "x-api-key") {
+      headers["x-api-key"] = key;
+      headers["anthropic-version"] = "2023-06-01";
+    } else if (key && p.modelsAuth !== "none") {
+      headers.Authorization = `Bearer ${key}`;
+    }
+    try {
+      const r = await fetchKeyed(url, { headers, signal });
+      if (!r.ok) {
+        try { await r.body?.cancel(); } catch {}
+        const hint = [401, 403].includes(r.status) ? "，请检查 API Key 和模型列表权限" : "";
+        return failed("模型清单请求失败（上游 HTTP " + r.status + "）" + hint, 502, r.status);
+      }
+      const first = await fetchJsonCapped(r);
+      if (first?.error || first?.success === false || (!Array.isArray(first?.data) && !Array.isArray(first?.models))) {
+        return failed("接口没有返回有效的模型清单，请检查清单地址和 API Key");
+      }
+      const records = normalizeModels(await morePages(url, headers, first, signal));
+      const models = mergeKnown(records, p.fallbackModels);
+      const list = withCatalog(withConfigured(models, p), p);
+      if (list.length || p.custom) {
+        log(`[${p.id}] 模型清单：${list.length} 个`);
+        return list;
+      }
+      return failed("接口没有返回可选的对话模型");
+    } catch (e) {
+      if (signal.aborted) return failed("获取模型清单超时，请重试", 504);
+      if (e instanceof SyntaxError) return failed("接口没有返回有效的 JSON 模型清单，请检查清单地址");
+      return failed("无法读取模型清单，请检查接口地址和网络后重试");
+    }
+  };
+  // 独立清单（含不带密钥的）仍走同主机校验；没填清单时，从已设的接口地址派生目录。
   if (p.modelsUrl && (key || p.modelsAuth === "none") && modelsUrlOk(p)) {
     const list = await pull(p.modelsUrl);
     if (list) return keep(list);
   } else if (!p.modelsUrl && p.custom && key && (guess || GUESSED.has(sig))) {
-    // 自定义端口没填清单地址：按接口地址猜几个同主机的 /models（第三方端口多半同时开着 OpenAI 形状的清单）。
-    // 只试和接口同主机同端口的地址（照样过 modelsUrlOk），密钥不会被带去别处；猜中的记在这份配置名下，下次直接用
     const hit = GUESSED.get(sig);
-    for (const url of hit ? [hit] : guessModelsUrls(p.baseUrl)) {
-      if (!modelsUrlOk({ baseUrl: p.baseUrl, modelsUrl: url })) continue;
+    const urls = [...new Set([hit, ...guessModelsUrls(p.baseUrl)].filter(Boolean))];
+    for (const url of urls) {
+      // 用户保存的 HTTP 接口已允许向本 origin 发送此 Key；例外仅用于从它派生的目录，不放宽独立 modelsUrl。
+      if (!modelsUrlOk({baseUrl: p.baseUrl, modelsUrl: url}) && !savedHttpCatalog(p, url)) continue;
       const list = await pull(url);
-      if (list) { GUESSED.set(sig, url); return keep(list); }
+      if (list) {
+        if (gen === CACHE_GEN) GUESSED.set(sig, url);
+        return keep(list);
+      }
+      if (signal.aborted || [401, 403, 429].includes(failure?.upstreamStatus)) break;
     }
-    if (hit) GUESSED.delete(sig);
+    if (gen === CACHE_GEN && GUESSED.get(sig) === hit) GUESSED.delete(sig);
   }
-  // 该猜而这次没猜（开跑前那次）：先用兜底清单，但不记 10 分钟，用户打开清单时照样去猜
+  // 打开时可用已有的清单或手填型号；手动刷新失败就报错，保留先前成功的缓存。
+  const fallback = c?.list || withConfigured((p.fallbackModels || []).map((m) => ({
+    context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m
+  })), p);
+  if (reportErrors && (force || !fallback.length)) {
+    if (!failure && !key && p.modelsAuth !== "none") failed("请先为这个接口保存 API Key", 400);
+    if (!failure && !inline) failed(p.modelsUrl
+      ? "单独设置的模型清单地址需要与接口同主机、同端口，并使用 HTTPS 或本机回环地址"
+      : "请检查已保存的自定义接口地址", 400);
+    if (failure) throw failure;
+  }
   const skipped = !p.modelsUrl && p.custom && key && !guess && !GUESSED.has(sig);
-  return keep(c && c.list ? c.list
-    : withConfigured((p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })), p), !skipped);
+  return keep(fallback, !skipped && (!p.custom || (!failure && fallback.length > 0)));
 }
 // 自定义端口猜中的清单地址（按配置指纹记；改了配置指纹就变，重新猜）
 const GUESSED = new Map();
+function savedHttpCatalog(p, candidate) {
+  const saved = p.explicit && p.custom && providerById(p.id);
+  if (!saved || !saved.custom || saved.baseUrl !== p.baseUrl || saved.modelsUrl) return false;
+  const base = new URL(saved.baseUrl), url = new URL(candidate);
+  return base.protocol === "http:" && !base.username && !base.password && base.origin === url.origin;
+}
 /** 由接口地址猜清单地址：去掉末尾的 /anthropic、/v1 之类，拼 /v1/models、/models；再试主机根上的 /v1/models */
 export function guessModelsUrls(baseUrl) {
   let u; try { u = new URL(String(baseUrl || "")); } catch { return []; }
@@ -383,7 +421,7 @@ export function guessModelsUrls(baseUrl) {
 }
 /** 分页的清单（Anthropic 官方 /v1/models 默认一页 20 个，带 has_more / last_id）：顺着 after_id 接着拉，最多 10 页。
  *  不分页的厂商第一页里没有 has_more，原样返回；后面哪页出错就用已经拿到的（0.6.9 审计 195-U.7） */
-async function morePages(url, headers, j) {
+async function morePages(url, headers, j, signal) {
   if (!j || !Array.isArray(j.data)) return j;
   const data = [...j.data];
   let cur = j;
@@ -392,7 +430,7 @@ async function morePages(url, headers, j) {
       const u = new URL(url);
       u.searchParams.set("after_id", cur.last_id);
       if (!u.searchParams.has("limit")) u.searchParams.set("limit", "1000");
-      const r = await fetchKeyed(u.href, { headers, signal: AbortSignal.timeout(15000) });
+      const r = await fetchKeyed(u.href, { headers, signal });
       if (!r.ok) { try { await r.body?.cancel(); } catch {} break; }
       cur = await fetchJsonCapped(r);
       if (!cur || !Array.isArray(cur.data) || !cur.data.length) break;
@@ -483,7 +521,12 @@ export async function routeModels(req, res, u, p) {
     const now = effectiveModel(sid, q("project"), { provider: q("provider"), model: q("model"), effort: q("effort") });
     const pp = providerById(now.provider) || PROVIDER;
     const bp = (u.searchParams.get("browse") && providerById(u.searchParams.get("browse"))) || pp;
-    const ms = withWindows(await fetchModels(u.searchParams.get("refresh") === "1", bp, { guess: true }));
+    let ms;
+    try { ms = withWindows(await fetchModels(u.searchParams.get("refresh") === "1", bp, { guess: true, reportErrors: true })); }
+    catch (error) {
+      if (error.code !== "model_catalog_unavailable") throw error;
+      return sendJson(res, error.status, { error: error.code, message: error.message });
+    }
     const own = withWindows(bp === pp ? ms : cachedModels(pp));
     // 只认同名：指定了（或那家有默认型号）却不在清单里，能力和窗口就是不知道，别借第一项的（#82，和 currentModelInfo 一致）
     const want = now.model || pp.defaultModel;

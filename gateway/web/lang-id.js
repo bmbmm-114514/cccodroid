@@ -1,6 +1,8 @@
 // id dictionary: Chinese source text (the key) → id.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT["id"] = {
+  "添加并获取模型": "Tambahkan dan ambil model",
+  "请先保存接口修改，再刷新模型清单。": "Simpan perubahan endpoint sebelum memuat ulang daftar model.",
   "会话": "Sesi",
   "设置": "Pengaturan",
   "能力": "Kemampuan",

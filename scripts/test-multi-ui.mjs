@@ -56,13 +56,28 @@ async function checkWorkbench() {
     return result;
   }
   let checkingLogin = false, imported = false, simulateDrop = "";
+  let addedEndpoint, catalogFailure = 0;
+  const catalogReads = [];
   window.addEventListener("error", event => errors.push(event.message));
   window.fetch = async (u, opts) => {
     const addr = new URL(u, location.href);
+    if (addr.pathname === "/api/providers/save") {
+      const body = JSON.parse(opts.body);
+      addedEndpoint = { id:"custom-newapi-fixture", group:"custom", custom:true, hasKey:true, label:body.label,
+        baseUrl:body.baseUrl, authStyle:body.authStyle, defaultModel:body.defaultModel };
+      return Response.json({ok:true,id:addedEndpoint.id});
+    }
+    if (addr.pathname === "/api/models" && addr.searchParams.has("browse")) {
+      const provider = addr.searchParams.get("browse");
+      catalogReads.push(provider);
+      if (catalogFailure === 403) return Response.json({message:"fixture denied"}, {status:403});
+      return Response.json({models:catalogFailure ? [] : [{id:"manual-v2"},{id:"model-1",name:"Fixture model"}]});
+    }
     if (addr.pathname === "/api/providers") {
       return Response.json({ active: "fixture", providers: [
         { id: "anthropic", login: true, group: "claude", label: "Claude Code" },
         { id: "fixture", group: "custom", custom: true, active: true, label: "Fixture" },
+        ...(addedEndpoint ? [addedEndpoint] : []),
       ] });
     }
     if (checkingLogin && addr.pathname === "/api/login/status") return Response.json({ loggedIn: false });
@@ -113,6 +128,25 @@ async function checkWorkbench() {
   await until(() => [...by("set-provider").options].some(o => o.value === "chatgpt"), "account provider options");
   const order = [...by("set-provider").options].map(o => o.value);
   assert(order.slice(order.indexOf("anthropic"), order.indexOf("anthropic")+3).join(",") === "anthropic,chatgpt,google", "official accounts ordered together");
+  select("set-provider", "__new__");
+  by("cc-label").value = "Local New API fixture";
+  by("cc-base").value = "https://relay.example.invalid/v1";
+  by("pc-key").value = "synthetic";
+  by("prov-card").querySelector("[data-act=save]").click();
+  await until(() => by("cc-catalog")?.options.length === 3, "discover after adding without a model");
+  assert(!by("cc-model").value && catalogReads.includes(addedEndpoint.id), "discovery preserves the unselected model");
+  select("cc-catalog", "model-1");
+  assert(by("cc-model").value === "model-1", "choosing a discovered default");
+  by("cc-model").value = "manual-override";
+  catalogFailure = 403;
+  by("prov-card").querySelector("[data-act=catalog]").click();
+  await until(() => by("cc-catalog-status").textContent.includes("fixture denied"), "refresh failure is visible");
+  assert(by("cc-model").value === "manual-override" && by("cc-catalog").options.length === 3, "failed refresh preserves manual and listed values");
+  catalogFailure = 1;
+  by("prov-card").querySelector("[data-act=catalog]").click();
+  await until(() => by("cc-catalog").disabled, "empty catalog leaves manual model usable");
+  assert(by("cc-model").value === "manual-override", "empty list preserves manual value");
+  catalogFailure = 0;
   select("set-provider", "chatgpt");
   await until(() => !by("set-agent-tier-row").classList.contains("hidden"), "Codex service tier capabilities");
   await until(() => !by("set-agent-login").disabled, "ChatGPT authorization enabled");
@@ -146,6 +180,14 @@ async function checkWorkbench() {
   await until(() => by("ma-turns").textContent.includes("fixture stopped"), "interrupted turn");
   by("ma-turns").querySelector("[data-retry-turn]").click();
   select("ma-mode", "third-party"); select("ma-provider", "third");
+  await until(() => by("ma-catalog").options.length === 3, "handoff model discovery");
+  select("ma-catalog", "manual-v2");
+  assert(by("ma-model").value === "manual-v2", "the listed model becomes the handoff model");
+  by("ma-model").value = "model-1";
+  const reads = catalogReads.filter(id => id === "third").length;
+  by("ma-retry").click();
+  await until(() => by("btn-send").disabled === false,"reloaded handoff");
+  assert(catalogReads.filter(id => id === "third").length === reads && by("ma-model").value === "model-1","polling preserves the input and does not fetch models again");
   by("btn-send").click();
   await until(() => sent()?.mode === "third-party", "third-party retry");
   assert(sent().provider === "third" && sent().model === "model-1", "provider and model");

@@ -48,19 +48,29 @@ public class ProviderSettingsReturnTest {
     public static class Gateway {
         static volatile String active = "anthropic";
         static volatile JSONObject lastWrite;
+        static volatile JSONObject customConfig;
+        static volatile String customChoice;
         static final AtomicInteger writes = new AtomicInteger();
         static CountDownLatch allowSave = new CountDownLatch(1);
 
         @Implementation
         protected static HttpURLConnection gateway(String method, String path, byte[] body) throws Exception {
             JSONObject result = new JSONObject();
-            if (path.startsWith("/api/multi/preferences")) {
+            if (path.equals("/api/providers/save")) {
+                customConfig = new JSONObject(new String(body, StandardCharsets.UTF_8));
+                result.put("id", "custom-1");
+            } else if (path.equals("/api/providers") && customConfig != null) {
+                result.put("providers", new JSONArray().put(new JSONObject().put("id", "custom-1").put("custom", true)
+                        .put("label", customConfig.optString("label", "Test")).put("hasKey", true)));
+            } else if (path.startsWith("/api/multi/preferences")) {
                 if ("POST".equals(method)) {
                     writes.incrementAndGet();
                     if (!allowSave.await(8, TimeUnit.SECONDS)) throw new AssertionError("save not released");
                     lastWrite = new JSONObject(new String(body, StandardCharsets.UTF_8));
                     active = lastWrite.getString("provider");
+                    if ("custom-1".equals(active) && lastWrite.has("model")) customChoice = lastWrite.optString("model");
                 }
+                if ("custom-1".equals(active)) result.put("model", customChoice);
                 result.put("provider", active);
                 result.put("agent", "chatgpt".equals(active) ? "codex" : "claude");
             } else if (path.equals("/api/login/start")) {
@@ -124,6 +134,8 @@ public class ProviderSettingsReturnTest {
         Gateway.writes.set(0);
         Gateway.allowSave = new CountDownLatch(1);
         Gateway.lastWrite = null;
+        Gateway.customConfig = null;
+        Gateway.customChoice = "";
         CatalogRequests.success.clear();
         CatalogRequests.failure.clear();
         CatalogRequests.count = 0;
@@ -317,6 +329,65 @@ public class ProviderSettingsReturnTest {
         page.dismiss();
     }
 
+    @Test @Config(shadows = {Gateway.class, CatalogRequests.class})
+    public void customProviderIsDiscoveredAfterSaveAndCanRefreshAndSelectInBothPickers() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        Gateway.allowSave.countDown();
+        ProviderSettingsDialog.show(activity, null);
+        Dialog page = ShadowDialog.getLatestDialog();
+        await(() -> CatalogRequests.success.containsKey(CLAUDE));
+        CatalogRequests.complete("/api/multi/state", new JSONObject());
+        CatalogRequests.complete(CLAUDE, catalog("fixture-official", "Official"));
+        tap(page, "选择 API 接口");
+        BottomSheetDialog providers = (BottomSheetDialog) ShadowDialog.getLatestDialog();
+        providers.setDismissWithAnimation(false);
+        tap(providers, "添加自定义接口");
+        await(() -> ShadowDialog.getLatestDialog() instanceof androidx.appcompat.app.AlertDialog);
+        Dialog form = ShadowDialog.getLatestDialog();
+        EditText address = (EditText) find(form, "Base URL（兼容 New API）");
+        EditText key = (EditText) find(form, "API 密钥 (API Key)");
+        key.setText("test-only");
+        tap(form, "保存并选择");
+        assertTrue(form.isShowing());
+        assertNotNull(address.getError());
+        address.setText("https://models.invalid/v1");
+        tap(form, "保存并选择");
+        final String path = "/api/multi/models?agent=claude&model=&provider=custom-1";
+        await(() -> CatalogRequests.success.containsKey(path + "&refresh=1"));
+        assertEquals("models.invalid", Gateway.customConfig.getString("label"));
+        assertEquals("https://models.invalid/v1", Gateway.customConfig.getString("baseUrl"));
+        assertEquals("test-only", Gateway.customConfig.getString("apiKey"));
+        assertEquals("bearer", Gateway.customConfig.getString("authStyle"));
+        CatalogRequests.complete(path + "&refresh=1", catalog("fixture-a", "Model A"));
+        tap(page, "默认模型");
+        BottomSheetDialog models = (BottomSheetDialog) ShadowDialog.getLatestDialog();
+        models.setDismissWithAnimation(false);
+        tap(models, "Model A");
+        String selected = path.replace("model=&", "model=fixture-a&");
+        await(() -> CatalogRequests.success.containsKey(selected));
+        CatalogRequests.complete(selected, catalog("fixture-a", "Model A"));
+        assertEquals("fixture-a", Gateway.customChoice);
+        tap(page, "刷新模型列表");
+        CatalogRequests.failRead(selected + "&refresh=1", "目录服务暂不可用");
+        assertNotNull(find(page, "Model A"));
+        assertNotNull(find(page, "目录服务暂不可用"));
+        tap(page, "模型列表未能更新 · 重试");
+        CatalogRequests.complete(selected + "&refresh=1", catalog("fixture-b", "Model B"));
+        assertNotNull(find(page, "fixture-a（自定义）"));
+        assertNull(find(page, "目录服务暂不可用"));
+        page.dismiss();
+
+        ProviderSettingsDialog.quick(activity, null);
+        BottomSheetDialog quick = (BottomSheetDialog) ShadowDialog.getLatestDialog();
+        await(() -> CatalogRequests.success.containsKey(selected));
+        CatalogRequests.complete(selected, catalog("fixture-b", "Model B"));
+        assertNotNull(find(quick, "models.invalid"));
+        tap(quick, "Model B");
+        await(() -> !quick.isShowing());
+        assertEquals("fixture-b", Gateway.customChoice);
+        assertEquals("custom-1", Gateway.active);
+    }
+
     @Test public void mainSettingsEntryClosesDirectly() throws Exception {
         Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
         ProviderSettingsDialog.show(activity, null);
@@ -363,7 +434,8 @@ public class ProviderSettingsReturnTest {
 
     private static View find(View root, String label) {
         if (root.getVisibility() != View.VISIBLE) return null;
-        if ((root instanceof TextView && label.contentEquals(((TextView) root).getText()))
+        if ((root instanceof EditText && ((EditText) root).getHint() != null && label.contentEquals(((EditText) root).getHint()))
+                || (root instanceof TextView && label.contentEquals(((TextView) root).getText()))
                 || label.equals(root.getContentDescription())) return root;
         if (root instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) root;

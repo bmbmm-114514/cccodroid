@@ -1,6 +1,8 @@
 // fr dictionary: Chinese source text (the key) → fr.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT["fr"] = {
+  "添加并获取模型": "Ajouter et charger les modèles",
+  "请先保存接口修改，再刷新模型清单。": "Enregistrez les modifications du point de terminaison avant d’actualiser la liste des modèles.",
   "会话": "Sessions",
   "设置": "Réglages",
   "能力": "Capacités",

@@ -197,7 +197,7 @@ export async function routeMulti(req, res, u, p) {
       const provider = u.searchParams.get("provider");
       if (provider && agentFor(provider) !== agent) throw problem("该接口与所选 Agent 不匹配");
       let catalog;
-      if (agent === "claude") catalog = await claudeModels(model, provider || "anthropic");
+      if (agent === "claude") catalog = await claudeModels(model, provider || "anthropic", u.searchParams.get("refresh") === "1");
       else if (agent === "codex") {
         await requireEngine("codex");
         catalog = await withClient(api => api.models(model));
@@ -240,5 +240,5 @@ export async function routeMulti(req, res, u, p) {
       default: throw problem("找不到接口", 404);
     }
     return sendJson(res, 200, { ok: true });
-  } catch (e) { return sendJson(res, e.status || 500, { error: e.message, message: e.message }); }
+  } catch (e) { return sendJson(res, e.status || 500, { error: e.code === "model_catalog_unavailable" ? e.code : e.message, message: e.message }); }
 }

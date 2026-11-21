@@ -208,7 +208,7 @@ public class NativeChat {
         dock.setOrientation(LinearLayout.VERTICAL);
         dock.setPadding(h.dp(12), h.dp(4), h.dp(12), h.dp(8));
         h.body.addView(dock, new LinearLayout.LayoutParams(-1, -2));
-        handoff = new NativeHandoffPanel(dock, this::multiName);
+        handoff = new NativeHandoffPanel(h.a, dock, this::multiName);
         LinearLayout composer = new LinearLayout(h.a);
         composer.setGravity(Gravity.BOTTOM);
         composer.setBackground(PixelUi.shape(h.a, "surfaceContainerHigh", 28));

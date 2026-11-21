@@ -1,6 +1,8 @@
 // English dictionary: Chinese source text (the key) → English.  See i18n.js / langs.js for the rules.
 window.I18N_DICT = window.I18N_DICT || {};
 window.I18N_DICT.en = {
+  "添加并获取模型": "Add and fetch models",
+  "请先保存接口修改，再刷新模型清单。": "Save your endpoint changes before refreshing the model list.",
   // ── drawer tabs & relative time ──
   "会话": "Sessions",
   "设置": "Settings",

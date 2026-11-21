@@ -1,6 +1,47 @@
   // ── 模型标签与快速切换（输入栏下面那一行最左边）──
   // 标签写「模型 · 思考强度」；点它从底部弹面板：上面一排思考强度，下面搜索 + 最近用过 + 全部模型。
   // 不占输入区的地方。OpenRouter 这类几十上百个模型的，靠搜索框过滤。
+  // Settings and the handoff composer browse the saved provider without changing the active one.
+  const providerModelCatalogs = new Map();
+  function invalidateProviderCatalog(id) { providerModelCatalogs.delete(id); }
+  async function fillProviderModelChoices(id, list, manual, info, refresh = false) {
+    const token = Symbol();
+    list.catalogRequest = token;
+    const reset = list.dataset.provider !== id;
+    list.dataset.provider = id;
+    if (reset) {
+      list.replaceChildren(new Option(t("选择"), ""));
+      list.disabled = true;
+    }
+    list.onchange = () => {
+      if (list.value) manual.value = list.value;
+    };
+    if (!id) { info.textContent = ""; return; }
+    info.textContent = t("正在读取模型清单…");
+    let entry = providerModelCatalogs.get(id);
+    if (!entry || (!entry.pending && (refresh || Date.now() - entry.at > 60000))) {
+      const query = "/api/models?browse=" + encodeURIComponent(id) + "&refresh=1";
+      const current = { at: Date.now(), pending: true };
+      current.request = api(query).then(data => {
+        if (data.error || !Array.isArray(data.models)) throw new Error(data.message || t("读取模型清单失败"));
+        return data.models.filter(m => typeof m?.id === "string" && m.id);
+      }).finally(() => { current.pending = false; });
+      entry = current;
+      providerModelCatalogs.set(id, entry);
+    }
+    try {
+      const models = await entry.request;
+      if (!list.isConnected || list.catalogRequest !== token) return;
+      const choices = models.map(m => new Option(m.name && m.name !== m.id ? m.name + " · " + m.id : m.id, m.id));
+      list.replaceChildren(new Option(t("选择"), ""), ...choices);
+      list.value = models.some(m => m.id === manual.value) ? manual.value : "";
+      list.disabled = !models.length;
+      info.textContent = models.length ? t("{n} 个", {n: models.length}) : t("模型清单为空，请手填模型名称或重试。");
+    } catch (error) {
+      if (list.isConnected && list.catalogRequest === token) info.textContent = t("拉取模型清单失败：{msg}", {msg:error.message});
+    }
+  }
+
   const RECENT_KEY = "cc.recentModels";
   // 存坏了（手改、截断）别让整个型号弹层画不出来（审查 v0.5.5 W-L5）
   const recentIds = () => { try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); return Array.isArray(a) ? a.filter((x) => typeof x === "string") : []; } catch { return []; } };

@@ -171,6 +171,16 @@ test("U.5：试发也认回复的形状；清单请求按 modelsAuth 带头，no
   assert.equal(none.seen[0].url, "/v1/messages");
 });
 
+test("更新旧自定义接口的默认模型时保留独立的清单认证方式", () => {
+  const r = scenario(custom({authStyle:"bearer", modelsAuth:"none", modelsUrl:"https://fixture.invalid/models"}), `
+    P.upsertProvider("custom-1", { defaultModel:"model-b", authStyle:"bearer" });
+    const initial = P.providerById("custom-1").modelsAuth;
+    P.upsertProvider("custom-1", { authStyle:"x-api-key" });
+    console.log(JSON.stringify([initial, P.providerById("custom-1").modelsAuth]));`);
+  assert.equal(r.rc, 0, r.err);
+  assert.deepEqual(JSON.parse(r.out), ["none", "x-api-key"]);
+});
+
 test("U.7：清单分页（has_more / last_id）顺着 after_id 拉完", () => {
   const page = (ids, more) => JSON.stringify({ data: ids.map((id) => ({ id, type: "model" })), has_more: more, last_id: ids[ids.length - 1] });
   const r = scenario(custom({ modelsUrl: "/v1/models" }), `${fakeVendor({ "/v1/models?after_id=m2": [200, page(["m3", "m4"], true)], "/v1/models?after_id=m4": [200, page(["m5"], false)], "/v1/models": [200, page(["m1", "m2"], true)] })}
