@@ -100,11 +100,13 @@ final class NativeFiles {
     private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean drawingOutput;
 
-    private TextView termTextView = null;
+    private TerminalInputView termTextView = null;
     private ScrollView termScrollView = null;
     private volatile HttpURLConnection activeTermConn = null;
     private volatile Thread activeTermThread = null;
     private boolean termLoading = false;
+    private boolean creatingTerm;
+    private boolean autoStartTerm = true;
 
     private String projectId;
     private String pageError = "";
@@ -114,11 +116,15 @@ final class NativeFiles {
     private int editRequest;
     private boolean saving;
     private int termCols = 80, termRows = 24;
+    private Runnable pendingResize;
+    private boolean resizing;
     private volatile int streamGeneration;
     private static final ExecutorService termWrites = Executors.newSingleThreadExecutor();
     private final ArrayList<String> roots = new ArrayList<>();
 
     void leave() {
+        if (pendingResize != null) handler.removeCallbacks(pendingResize);
+        pendingResize = null;
         disconnectTerm();
         termTextView = null;
         termScrollView = null;
@@ -1144,18 +1150,8 @@ final class NativeFiles {
         sessionScroll.addView(sessionBox);
         topBar.addView(sessionScroll);
 
-        ImageButton newTermBtn = PixelUi.icon(h.a, "add", "新建终端", () -> {
-            h.post("/api/term/new", NativeHome.json("cols", termCols, "rows", termRows, "cwd", currentDir), resp -> {
-                JSONObject term = resp.optJSONObject("term");
-                if (term != null) {
-                    activeTermId = term.optString("id");
-                    outputTotal = 0; termExited = false; termOutput.reset();
-                    disconnectTerm();
-                }
-                loadTerm(h);
-            });
-        });
-        newTermBtn.setEnabled(termAvailable && !termLoading);
+        ImageButton newTermBtn = PixelUi.icon(h.a, "add", "新建终端", () -> createTerm(h));
+        newTermBtn.setEnabled(termAvailable && !termLoading && !creatingTerm);
         topBar.addView(newTermBtn);
 
         Runnable closeTerm = () -> {
@@ -1165,6 +1161,7 @@ final class NativeFiles {
                     .setMessage("确定结束当前终端会话进程吗？")
                     .setPositiveButton("关闭", (d, w) -> {
                         h.post("/api/term/" + Uri.encode(activeTermId) + "/kill", NativeHome.json(), res -> {
+                            autoStartTerm = false;
                             loadTerm(h);
                         });
                     })
@@ -1201,6 +1198,11 @@ final class NativeFiles {
             h.text(h.body, "当前运行环境没有可用的终端组件。");
             return;
         }
+        if (activeTermId == null) {
+            h.button(h.body, "新建终端", () -> createTerm(h));
+            return;
+        }
+        final String sessionId = activeTermId;
         // 终端输出滚动区域 (加权占满)
         termScrollView = new ScrollView(h.a);
         LinearLayout.LayoutParams outputParams = new LinearLayout.LayoutParams(-1, 0, 1f);
@@ -1209,13 +1211,10 @@ final class NativeFiles {
         termScrollView.setBackground(PixelUi.shape(h.a, "surfaceContainerLow", 16));
         termScrollView.setClipToOutline(true);
 
-        termTextView = new TextView(h.a);
-        termTextView.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        termTextView = TerminalInputView.attach(termScrollView, data -> sendTermKey(h, sessionId, data, null));
         termTextView.setTypeface(Typeface.MONOSPACE);
         termTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         termTextView.setTextColor(PixelUi.color(h.a, "onSurface"));
-        termTextView.setTextIsSelectable(true);
         int outPad = h.dp(12);
         termTextView.setPadding(outPad, outPad, outPad, outPad);
         termTextView.setText(termOutput.styledText());
@@ -1226,13 +1225,44 @@ final class NativeFiles {
             int rows = Math.max(5, Math.min(300, (b-t-2*outPad) / Math.max(1, termTextView.getLineHeight())));
             if (cols == termCols && rows == termRows) return;
             termCols = cols; termRows = rows;
-            termOutput.resize(cols, rows);
-            h.post("/api/term/" + Uri.encode(activeTermId) + "/resize", NativeHome.json("cols", cols, "rows", rows), ignored -> {});
+            scheduleTermResize(h);
         });
-        termScrollView.addView(termTextView);
         h.body.addView(termScrollView);
 
-        TerminalControls.add(h.body, data -> sendTermKey(h, data));
+        TerminalControls.add(h.body, (data, ack) -> sendTermKey(h, sessionId, data, ack));
+    }
+
+    private void createTerm(NativeHome h) {
+        if (creatingTerm) return;
+        creatingTerm = true;
+        if (activeTermId == null) {
+            termLoading = true;
+            render(h);
+        }
+        NativeRequests.call(h.a, "POST", "/api/term/new", NativeHome.json("cols", termCols,
+                "rows", termRows, "cwd", currentDir), response -> {
+            creatingTerm = false;
+            if (lastGeneration != h.generation || activeMode != MODE_TERM) return;
+            termLoading = false;
+            JSONObject term = response.optJSONObject("term");
+            if (term == null || term.optString("id").isEmpty()) {
+                pageError = "未能新建终端";
+                render(h);
+                return;
+            }
+            String id = term.optString("id");
+            termSessions.add(new TermSession(id, term.optString("title", id), term.optBoolean("alive", true)));
+            autoStartTerm = true;
+            connectTerm(h, id);
+        }, error -> {
+            creatingTerm = false;
+            if (lastGeneration != h.generation || activeMode != MODE_TERM) return;
+            termLoading = false;
+            if (activeTermId == null) {
+                pageError = error;
+                render(h);
+            } else h.notice(error);
+        });
     }
 
     private void loadTerm(NativeHome h) {
@@ -1255,19 +1285,22 @@ final class NativeFiles {
                     }
                 }
             }
-            if (!termSessions.isEmpty()) {
-                boolean hasActive = false;
-                for (TermSession s : termSessions) {
-                    if (s.id.equals(activeTermId)) {
-                        hasActive = true;
-                        break;
-                    }
-                }
-                if (!hasActive) {
-                    connectTerm(h, termSessions.get(0).id);
-                } else {
-                    connectTerm(h, activeTermId);
-                }
+            TermSession active = null, live = null;
+            for (TermSession session : termSessions) {
+                if (session.alive) live = session;
+                if (session.id.equals(activeTermId)) active = session;
+            }
+            if (creatingTerm) {
+                termLoading = true;
+                render(h);
+            } else if (live != null) {
+                connectTerm(h, active != null && active.alive ? active.id : live.id);
+            } else if (termAvailable && autoStartTerm) {
+                activeTermId = null;
+                disconnectTerm();
+                createTerm(h);
+            } else if (active != null) {
+                connectTerm(h, active.id);
             } else {
                 activeTermId = null;
                 disconnectTerm();
@@ -1285,7 +1318,11 @@ final class NativeFiles {
         }
         activeTermId = termId;
         render(h);
-        h.post("/api/term/" + Uri.encode(termId) + "/resize", NativeHome.json("cols", termCols, "rows", termRows), ok -> {});
+        scheduleTermResize(h);
+        streamTerm(h, termId);
+    }
+
+    private void streamTerm(NativeHome h, String termId) {
         final int ticket = streamGeneration;
         activeTermThread = new Thread(() -> {
             HttpURLConnection connection = null;
@@ -1337,17 +1374,42 @@ final class NativeFiles {
                 if (connection != null) connection.disconnect();
                 synchronized (this) { if (ticket == streamGeneration) activeTermConn = null; }
                 if (!finished) handler.postDelayed(() -> {
-                    if (ticket == streamGeneration && lastGeneration == h.generation) connectTerm(h,termId);
+                    if (ticket == streamGeneration && lastGeneration == h.generation) streamTerm(h, termId);
                 }, 2500);
             }
         }, "native-terminal-stream");
         activeTermThread.start();
     }
 
-    private boolean sendTermKey(NativeHome h, String data) {
-        if (activeTermId == null) { h.notice("请先新建或选择终端"); return false; }
-        if (termExited) { h.notice("终端已退出"); return false; }
-        final String tid = activeTermId;
+    // During IME motion many different row counts can arrive before the PTY acknowledges one.
+    private void scheduleTermResize(NativeHome h) {
+        if (pendingResize != null) handler.removeCallbacks(pendingResize);
+        pendingResize = () -> {
+            pendingResize = null;
+            if (activeTermId == null || termExited || termScrollView == null || lastGeneration != h.generation) return;
+            String id = activeTermId;
+            termOutput.resize(termCols, termRows);
+            resizing = true;
+            NativeRequests.call(h.a, "POST", "/api/term/" + Uri.encode(id) + "/resize",
+                    NativeHome.json("cols", termCols, "rows", termRows), ok -> finishTermResize(), error -> {
+                        if (id.equals(activeTermId) && lastGeneration == h.generation) h.notice(error);
+                        finishTermResize();
+                    });
+        };
+        if (!resizing) handler.postDelayed(pendingResize, 80);
+    }
+
+    private void finishTermResize() {
+        resizing = false;
+        if (pendingResize != null) handler.postDelayed(pendingResize, 80);
+    }
+
+    private boolean sendTermKey(NativeHome h, String tid, String data, Consumer<Boolean> ack) {
+        if (lastGeneration != h.generation || activeMode != MODE_TERM || !tid.equals(activeTermId) || termExited) {
+            if (termExited) h.notice("终端已退出");
+            if (ack != null) ack.accept(false);
+            return false;
+        }
         termWrites.execute(() -> {
             HttpURLConnection connection = null;
             try {
@@ -1360,8 +1422,12 @@ final class NativeFiles {
                 try (OutputStream os = connection.getOutputStream()) { os.write(bytes); }
                 int status = connection.getResponseCode();
                 if (status != 200) throw new IOException(status == 409 ? "终端已退出" : "终端写入失败 (HTTP " + status + ")");
+                if (ack != null) h.a.runOnUiThread(() -> ack.accept(true));
             } catch (Exception e) {
-                h.a.runOnUiThread(() -> { if (lastGeneration == h.generation && tid.equals(activeTermId)) h.notice(e.getMessage()); });
+                h.a.runOnUiThread(() -> {
+                    if (ack != null) ack.accept(false);
+                    if (lastGeneration == h.generation && tid.equals(activeTermId)) h.notice(e.getMessage());
+                });
             } finally { if (connection != null) connection.disconnect(); }
         });
         return true;
@@ -1375,10 +1441,7 @@ final class NativeFiles {
         handler.postDelayed(() -> {
             drawingOutput = false;
             if (termTextView == null || termScrollView == null) return;
-            ScrollView scroll = termScrollView;
-            boolean atBottom = !scroll.canScrollVertically(1);
-            termTextView.setText(termOutput.styledText());
-            if (atBottom) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+            termTextView.display(termOutput.styledText());
         }, 32);
     }
 

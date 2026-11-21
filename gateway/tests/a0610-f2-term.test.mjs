@@ -6,6 +6,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { NEXT } from "../gw/http.mjs";
 import { routeTerminal, TERMS, _termForTest } from "../gw/terminal.mjs";
@@ -48,6 +49,24 @@ test("H.5 进程退出后输入返回 409，不再假报已送达", async () => 
   const j = await r.json();
   assert.equal(j.error, "exited");
   assert.match(j.message, /已经退出/);
+});
+
+test("输入管道比终端先关闭时，接口报告未能写入", async () => {
+  const stdin = new Writable({
+    write(chunk, encoding, done) {
+      setImmediate(() => done(new Error("pipe closed")));
+    },
+  });
+  stdin.on("error", () => {});
+  fake("tclosing", { child: { stdin } });
+  try {
+    const r = await fetch(base + "/api/term/tclosing/in", { method: "POST", body: "abc" });
+    assert.equal(r.status, 503);
+    assert.equal((await r.json()).error, "input closed");
+  } finally {
+    stdin.destroy();
+    TERMS.delete("tclosing");
+  }
 });
 
 test("H.4 网关不认识这个终端时，输出流以 exit 收尾（前端会标成已退出）", async () => {

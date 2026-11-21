@@ -3,6 +3,8 @@ package cc.codroid;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -16,7 +18,7 @@ import com.google.android.material.button.MaterialButton;
 import static cc.codroid.PixelUi.dp;
 import android.widget.LinearLayout;
 
-import java.util.function.Predicate;
+import java.util.function.Consumer;
 
 final class TerminalControls {
     private TerminalControls() {}
@@ -51,7 +53,11 @@ final class TerminalControls {
         }
     };
 
-    static void add(LinearLayout parent, Predicate<String> send) {
+    interface Writer {
+        void write(String data, Consumer<Boolean> acknowledged);
+    }
+
+    static void add(LinearLayout parent, Writer writer) {
         Context c = parent.getContext();
 
         LinearLayout root = new LinearLayout(c);
@@ -92,7 +98,7 @@ final class TerminalControls {
                 KeySpec spec = group[i];
                 boolean isLastInGroup = (i == group.length - 1);
 
-                MaterialButton key = PixelUi.button(c, spec.label, () -> send.test(spec.payload));
+                MaterialButton key = PixelUi.button(c, spec.label, () -> writer.write(spec.payload, null));
                 key.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
                 key.setMaxLines(1);
                 // A horizontally scrolling TextView would center the label in its virtual layout.
@@ -146,7 +152,7 @@ final class TerminalControls {
         edit.setBackground(null);
         edit.setSingleLine(true);
         edit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        edit.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        edit.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN);
         edit.setPadding(dp(c, 4), dp(c, 8), dp(c, 4), dp(c, 8));
 
         LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(
@@ -156,15 +162,28 @@ final class TerminalControls {
         );
         edit.setLayoutParams(editLp);
 
-        Runnable executeAction = () -> {
-            String text = edit.getText().toString();
-            if (send.test(text + "\n")) edit.setText("");
+        // Keep the draft until the PTY accepts it. A late reply must not erase newer typing.
+        long[] revision = {0}, submitted = {-1};
+        edit.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { revision[0]++; }
+            @Override public void afterTextChanged(Editable s) { }
+        });
+        Consumer<Boolean> submit = enter -> {
+            long version = revision[0];
+            if (submitted[0] == version) return;
+            String draft = edit.getText().toString();
+            if (!enter && draft.isEmpty()) return;
+            submitted[0] = version;
+            if (edit.hasFocus() && !draft.isEmpty()) edit.selectAll();
+            writer.write(enter ? draft + "\r" : draft, accepted -> {
+                if (version != revision[0]) return;
+                submitted[0] = -1;
+                if (accepted) edit.getText().clear();
+            });
         };
-
-        Runnable insertAction = () -> {
-            String text = edit.getText().toString();
-            if (!text.isEmpty() && send.test(text)) edit.setText("");
-        };
+        Runnable executeAction = () -> submit.accept(true);
+        Runnable insertAction = () -> submit.accept(false);
 
         edit.setOnEditorActionListener((v, actionId, event) -> {
             if (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {

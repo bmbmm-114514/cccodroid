@@ -10,7 +10,11 @@ public class NativeTerminalBuffer {
     private static final int MAX_SCROLLBACK = 2000;
     private static final int S_NORMAL = 0, S_ESC = 1, S_CSI = 2, S_OSC = 3, S_OSC_ESC = 4, S_CHARSET = 5;
 
-    private int cols, rows, curCol, curRow, savedCol, savedRow;
+    private int cols, rows, curCol, curRow;
+    private final Cursor savedMain = new Cursor();
+    private final Cursor savedAlt = new Cursor();
+    private final Cursor parkedMain = new Cursor();
+
     private boolean isAlt;
     private char[][] mainScreen, altScreen;
     private final ArrayDeque<char[]> scrollback = new ArrayDeque<>();
@@ -28,7 +32,10 @@ public class NativeTerminalBuffer {
     }
 
     public synchronized void reset() {
-        curCol = curRow = savedCol = savedRow = 0;
+        curCol = curRow = 0;
+        savedMain.set(0, 0);
+        savedAlt.set(0, 0);
+        parkedMain.set(0, 0);
         isAlt = false;
         state = S_NORMAL;
         escBuf.setLength(0);
@@ -41,12 +48,55 @@ public class NativeTerminalBuffer {
 
     public synchronized void resize(int cols, int rows) {
         if (cols <= 0 || rows <= 0 || (this.cols == cols && this.rows == rows)) return;
-        mainScreen = resizeGrid(mainScreen, cols, rows);
-        altScreen = resizeGrid(altScreen, cols, rows);
+        int mainCursorRow = isAlt ? parkedMain.row : curRow;
+        int mainShift = topShift(mainScreen, mainCursorRow, rows);
+        if (rows > this.rows) mainShift = -Math.min(rows - this.rows, scrollback.size());
+        int altShift = isAlt ? topShift(altScreen, curRow, rows) : 0;
+        mainScreen = resizeGrid(mainScreen, cols, rows, mainShift, true);
+        altScreen = resizeGrid(altScreen, cols, rows, altShift, false);
+
+        savedMain.resize(mainShift, rows, this.cols, cols);
+        savedAlt.resize(altShift, rows, this.cols, cols);
+        parkedMain.resize(mainShift, rows, this.cols, cols);
+        curRow -= isAlt ? altShift : mainShift;
+        curCol = resizedColumn(curCol, this.cols, cols);
         this.cols = cols;
         this.rows = rows;
-        curCol = Math.min(curCol, cols - 1);
-        curRow = Math.min(curRow, rows - 1);
+    }
+
+    // Remove unused space below the cursor first. Keep it on screen even when an
+    // application has drawn more rows below it than will fit in the new viewport.
+    private int topShift(char[][] screen, int cursorRow, int newRows) {
+        if (newRows >= screen.length) return 0;
+        int last = screen.length - 1;
+        while (last > cursorRow && trimmedLength(screen[last]) == 0) last--;
+        return Math.min(cursorRow, Math.max(0, last + 1 - newRows));
+    }
+
+    // A column one past the margin means the next printable character must wrap.
+    private static int resizedColumn(int col, int oldCols, int newCols) {
+        return Math.min(col, col == oldCols ? newCols : newCols - 1);
+    }
+
+    private static final class Cursor {
+        int row, col;
+
+        void set(int row, int col) {
+            this.row = row;
+            this.col = col;
+        }
+
+        void resize(int shift, int rows, int oldCols, int newCols) {
+            row = Math.max(0, Math.min(row - shift, rows - 1));
+            col = resizedColumn(col, oldCols, newCols);
+        }
+    }
+
+    private Cursor savedCursor() { return isAlt ? savedAlt : savedMain; }
+
+    private void restoreCursor(Cursor cursor) {
+        curRow = cursor.row;
+        curCol = cursor.col;
     }
 
     public synchronized void feed(String rawChunk) {
@@ -67,10 +117,9 @@ public class NativeTerminalBuffer {
                     if (ch == '[') { state = S_CSI; escBuf.setLength(0); }
                     else if (ch == ']') state = S_OSC;
                     else if (ch == '(' || ch == ')') state = S_CHARSET;
-                    else if (ch == '7') { savedRow = curRow; savedCol = curCol; state = S_NORMAL; }
+                    else if (ch == '7') { savedCursor().set(curRow, curCol); state = S_NORMAL; }
                     else if (ch == '8') {
-                        curRow = Math.min(savedRow, rows - 1);
-                        curCol = Math.min(savedCol, cols - 1);
+                        restoreCursor(savedCursor());
                         state = S_NORMAL;
                     } else if (ch == 'c') reset();
                     else state = S_NORMAL;
@@ -133,8 +182,7 @@ public class NativeTerminalBuffer {
         char[] first = scr[0];
         System.arraycopy(scr, 1, scr, 0, rows - 1);
         if (!isAlt) {
-            scrollback.add(first);
-            if (scrollback.size() > MAX_SCROLLBACK) scrollback.pollFirst();
+            rememberRow(first);
             scr[rows - 1] = createRow(cols);
         } else {
             Arrays.fill(first, ' ');
@@ -180,11 +228,8 @@ public class NativeTerminalBuffer {
                 break;
             case 'h': if (qmark && isAltScreenMode(p1)) switchScreen(true); break;
             case 'l': if (qmark && isAltScreenMode(p1)) switchScreen(false); break;
-            case 's': savedRow = curRow; savedCol = curCol; break;
-            case 'u':
-                curRow = Math.min(savedRow, rows - 1);
-                curCol = Math.min(savedCol, cols - 1);
-                break;
+            case 's': savedCursor().set(curRow, curCol); break;
+            case 'u': restoreCursor(savedCursor()); break;
             case 'm':
                 String[] tokens = s.split(";", -1);
                 int[] params = new int[tokens.length];
@@ -203,12 +248,12 @@ public class NativeTerminalBuffer {
         if (this.isAlt == toAlt) return;
         this.isAlt = toAlt;
         if (toAlt) {
-            savedRow = curRow; savedCol = curCol;
+            parkedMain.set(curRow, curCol);
+            savedAlt.set(0, 0);
             clearGrid(altScreen);
             curRow = curCol = 0;
         } else {
-            curRow = Math.min(savedRow, rows - 1);
-            curCol = Math.min(savedCol, cols - 1);
+            restoreCursor(parkedMain);
         }
     }
 
@@ -282,16 +327,32 @@ public class NativeTerminalBuffer {
         for (char[] row : g) erase(row, 0, row.length);
     }
 
-    private char[][] resizeGrid(char[][] old, int nc, int nr) {
+    private void rememberRow(char[] line) {
+        scrollback.addLast(line);
+        if (scrollback.size() > MAX_SCROLLBACK) scrollback.removeFirst();
+    }
+
+    private char[][] resizeGrid(char[][] old, int nc, int nr, int shift, boolean main) {
         char[][] next = new char[nr][];
-        for (int r = 0; r < nr; r++) {
-            next[r] = createRow(nc);
-            if (r < rows) {
-                System.arraycopy(old[r], 0, next[r], 0, Math.min(cols, nc));
-                Style[] previous = styles.get(old[r]);
-                if (previous != null) styles.put(next[r], Arrays.copyOf(previous,nc));
-            }
+        if (main) {
+            for (int i = 0; i < shift; i++) rememberRow(old[i]);
+            for (int i = -shift - 1; i >= 0; i--) next[i] = resizedRow(scrollback.removeLast(), nc);
+        }
+        for (int i = Math.max(0, -shift); i < nr; i++) {
+            int source = i + shift;
+            next[i] = source < old.length ? resizedRow(old[source], nc) : createRow(nc);
         }
         return next;
+    }
+
+    private char[] resizedRow(char[] old, int width) {
+        if (old.length == width) return old;
+        char[] row = createRow(width);
+        System.arraycopy(old, 0, row, 0, Math.min(old.length, width));
+        Style[] previous = styles.get(old);
+        if (previous != null) styles.put(row, Arrays.copyOf(previous, width));
+        // Don't leave half of a wide glyph at the right margin.
+        if (width < old.length && old[width] == 0) erase(row, width - 1, width);
+        return row;
     }
 }

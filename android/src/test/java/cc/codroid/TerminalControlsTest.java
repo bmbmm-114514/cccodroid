@@ -40,7 +40,10 @@ public class TerminalControlsTest {
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
         List<String> writes = new ArrayList<>();
-        TerminalControls.add(root, data -> !data.startsWith("offline") && writes.add(data));
+        TerminalControls.add(root, (data, ack) -> {
+            boolean accepted = !data.startsWith("offline") && writes.add(data);
+            if (ack != null) ack.accept(accepted);
+        });
         root.measure(View.MeasureSpec.makeMeasureSpec(320, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.AT_MOST));
         root.layout(0, 0, 320, root.getMeasuredHeight());
@@ -65,10 +68,10 @@ public class TerminalControlsTest {
         assertEquals("pwd", writes.get(9));
         assertEquals("", editor.getText().toString());
         send.performClick();
-        assertEquals("\n", writes.get(10));
+        assertEquals("\r", writes.get(10));
         editor.setText("ls");
         editor.onEditorAction(EditorInfo.IME_ACTION_SEND);
-        assertEquals("ls\n", writes.get(11));
+        assertEquals("ls\r", writes.get(11));
         editor.setText("offline");
         send.performClick();
         assertEquals("offline", editor.getText().toString());

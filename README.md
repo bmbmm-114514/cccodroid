@@ -6,6 +6,8 @@ This fork starts at upstream v0.7.14. Choose Claude Code, Codex, or Antigravity 
 
 The default Material 3 interface uses wallpaper colors on Android 12+ and a light or dark palette on older releases. The four main destinations appear at the bottom on phones and in a navigation rail on wider windows. On Android 14+ with gesture navigation, swipe from either edge to preview the previous native page. Release to go back or reverse the gesture to stay. Tap the model in the chat toolbar to choose a provider and model for the next message in the same conversation. The picker keeps its height as you browse providers. Returning from full provider settings restores the open picker. Settings retains all five classic themes. Open the full provider settings to sign into Claude, ChatGPT or Google or to configure an API provider. Reasoning controls follow the selected model, with Fast available for supported Codex models.
 
+Tap the native terminal output to type directly. The command field also lets you compose a line before sending it with or without a newline.
+
 The 0.4.2 test APK targets SDK 28 and supports Android 8.0+ on arm64. Its package ID is `cc.agentui`, so it can be installed alongside the original app. The build writes `dist/cccodroid-multi-agent.apk`.
 
 The upstream documentation and upstream APK links follow below. [Integration notes in Chinese](README.zh-CN.md#多-agent-整合分支)

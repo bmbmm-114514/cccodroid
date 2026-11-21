@@ -238,7 +238,13 @@ async function handleTerm(req, res, p) {
   if (op === "in") {
     // 进程已经退出：以前照样回 200，输入被静默吞掉（195-H.5）。现在明确告诉界面
     if (!t.alive) return sendJson(res, 409, { error: "exited", message: tz("终端进程已经退出，输入没有送出去") });
-    try { t.child.stdin.write(body); } catch {}
+    try {
+      await new Promise((resolve, reject) => {
+        t.child.stdin.write(body, err => err ? reject(err) : resolve());
+      });
+    } catch {
+      return sendJson(res, 503, { error: "input closed", message: tz("终端输入通道已关闭，输入没有送出去") });
+    }
     return sendJson(res, 200, { ok: true });
   }
   let b = {};
