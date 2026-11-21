@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
+import com.google.android.material.navigation.NavigationBarView;
 import java.time.Duration;
 import java.util.function.Consumer;
 import org.json.JSONObject;
@@ -95,36 +96,104 @@ public class NativeNavigationMotionTest {
         }
     }
 
-    @Test public void tabChangesHandOffTextBeforeShowingTheNextPage() {
+    @Test public void tabsSlideEdgeToEdgeInBothDirectionsWhileNavigationStaysAnchored() {
         NativeHome home = newHome();
         try {
             View page = (View) home.body.getParent();
             ViewGroup viewport = (ViewGroup) page.getParent();
-            View snapshot = viewport.getChildAt(0);
-            assertNotSame(snapshot, page);
+            View outgoing = viewport.getChildAt(0);
+            NavigationBarView navigation = ReflectionHelpers.getField(home, "navigation");
             PixelPageMotion motion = ReflectionHelpers.getField(home, "motion");
+            int width = viewport.getWidth();
             for (String destination : new String[]{"settings", "chat"}) {
-                home.selectTab(destination);
+                int direction = destination.equals("settings") ? 1 : -1;
+                navigation.setSelectedItemId(PixelNav.tabIndex(destination));
                 layout(home);
-                assertEquals(View.VISIBLE, snapshot.getVisibility());
-                assertEquals(0f, page.getAlpha(), 0f);
-                boolean outgoingFaded = false;
-                boolean incomingFaded = false;
+                assertEquals(destination, home.screen);
+                assertEquals(View.VISIBLE, outgoing.getVisibility());
+                assertEquals(0f, outgoing.getTranslationX(), 0f);
+                assertEquals(direction * width, page.getTranslationX(), 0f);
                 ValueAnimator transition = ReflectionHelpers.getField(motion, "transition");
+                transition.setCurrentFraction(.25f);
+                assertTrue(Math.abs(page.getTranslationX()) > 0f && Math.abs(page.getTranslationX()) < width);
                 for (int percent = 0; percent < 100; percent++) {
                     transition.setCurrentFraction(percent / 100f);
-                    float old = snapshot.getAlpha(), next = page.getAlpha();
-                    assertTrue("both pages have visible text", old == 0f || next == 0f);
-                    outgoingFaded |= old > 0f && old < 1f;
-                    incomingFaded |= next > 0f && next < 1f;
+                    assertEquals((float) direction * width, page.getTranslationX() - outgoing.getTranslationX(), 0f);
+                    assertEquals(1f, outgoing.getAlpha(), 0f);
+                    assertEquals(1f, page.getAlpha(), 0f);
+                    assertEquals(0f, navigation.getTranslationX(), 0f);
                 }
                 transition.end();
-                assertTrue(outgoingFaded);
-                assertTrue(incomingFaded);
-                assertEquals(View.INVISIBLE, snapshot.getVisibility());
-                assertEquals(1f, page.getAlpha(), 0f);
+                assertEquals(View.INVISIBLE, outgoing.getVisibility());
                 assertEquals(0f, page.getTranslationX(), 0f);
             }
+        } finally {
+            home.dispose();
+        }
+    }
+
+    @Test public void systemBackWithoutAnEdgeGestureReturnsWithTheSameTabMotion() {
+        NativeHome home = newHome();
+        try {
+            NavigationBarView navigation = ReflectionHelpers.getField(home, "navigation");
+            PixelPageMotion motion = ReflectionHelpers.getField(home, "motion");
+            View page = (View) home.body.getParent();
+            ViewGroup viewport = (ViewGroup) page.getParent();
+            navigation.setSelectedItemId(PixelNav.tabIndex("settings"));
+            layout(home);
+            ValueAnimator forward = ReflectionHelpers.getField(motion, "transition");
+            forward.end();
+
+            home.commitBack();
+            layout(home);
+            assertEquals("chat", home.screen);
+            assertEquals(-viewport.getWidth(), page.getTranslationX(), 0f);
+            ValueAnimator back = ReflectionHelpers.getField(motion, "transition");
+            back.setCurrentFraction(.35f);
+            assertEquals(1f, page.getAlpha(), 0f);
+            assertEquals(1f, viewport.getChildAt(0).getAlpha(), 0f);
+            assertTrue(page.getTranslationX() < 0 && page.getTranslationX() > -viewport.getWidth());
+        } finally {
+            home.dispose();
+        }
+    }
+
+    @Test public void reversingATabSlidePreservesBothPositionsAndAThirdTabStartsFromTheVisibleFrame() {
+        NativeHome home = newHome();
+        try {
+            NavigationBarView navigation = ReflectionHelpers.getField(home, "navigation");
+            PixelPageMotion motion = ReflectionHelpers.getField(home, "motion");
+            View page = (View) home.body.getParent();
+            ViewGroup viewport = (ViewGroup) page.getParent();
+            View outgoing = viewport.getChildAt(0);
+            navigation.setSelectedItemId(PixelNav.tabIndex("settings"));
+            layout(home);
+            ValueAnimator forward = ReflectionHelpers.getField(motion, "transition");
+            forward.setCurrentFraction(.2f);
+            float settingsX = page.getTranslationX(), chatX = outgoing.getTranslationX();
+
+            navigation.setSelectedItemId(PixelNav.tabIndex("chat"));
+            layout(home);
+            assertEquals(settingsX, outgoing.getTranslationX(), 1f);
+            assertEquals(chatX, page.getTranslationX(), 1f);
+            ValueAnimator reverse = ReflectionHelpers.getField(motion, "transition");
+            reverse.setCurrentFraction(.15f);
+            assertTrue(Math.abs(page.getTranslationX()) < Math.abs(chatX));
+
+            navigation.setSelectedItemId(PixelNav.tabIndex("projects"));
+            layout(home);
+            assertEquals("projects", home.screen);
+            assertEquals(0f, outgoing.getTranslationX(), 0f);
+            assertEquals(1f, outgoing.getAlpha(), 0f);
+            assertEquals(viewport.getWidth(), page.getTranslationX(), 0f);
+            // Cancelled animators cannot move or reset the latest destination.
+            forward.end();
+            reverse.end();
+            assertEquals(View.VISIBLE, outgoing.getVisibility());
+            ValueAnimator third = ReflectionHelpers.getField(motion, "transition");
+            third.end();
+            assertEquals(0f, page.getTranslationX(), 0f);
+            assertEquals(View.INVISIBLE, outgoing.getVisibility());
         } finally {
             home.dispose();
         }

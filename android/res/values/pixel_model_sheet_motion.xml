@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="PixelModelSheetWindowMotion">
+        <item name="android:windowEnterAnimation">@anim/pixel_model_sheet_enter</item>
+        <item name="android:windowExitAnimation">@null</item>
+    </style>
+</resources>

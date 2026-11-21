@@ -19,6 +19,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -67,6 +68,11 @@ public final class ProviderSettingsDialog {
         boolean hasKey;
         boolean local;
         final String defaultModel;
+        JSONObject capabilities;
+        String capabilitiesModel;
+        boolean quickReading;
+        String quickSavedModel;
+        List<Choice> quickChoices;
 
         ProviderItem(String entryKey, String label, String agent, String providerId,
                      boolean isOfficial, int officialType, boolean hasKey, String defaultModel) {
@@ -131,7 +137,8 @@ public final class ProviderSettingsDialog {
 
     private PixelProviderPage dialog;
     private Dialog child;
-    private LinearLayout officialGroup;
+    private PixelSelectionStrip officialGroup;
+    private JSONObject accountState;
     private SelectRow modelRow, effortRow, tierRow;
     private Button btnPicker;
     private LinearLayout layoutError;
@@ -156,6 +163,13 @@ public final class ProviderSettingsDialog {
 
     private LinearLayout cardModel;
     private Button btnCustomModel;
+    private Button retryCapabilities;
+    private ProgressBar modelProgress;
+    private TextView modelChevron;
+    private final Runnable showModelProgress = () -> {
+        modelChevron.setVisibility(View.INVISIBLE);
+        modelProgress.setVisibility(View.VISIBLE);
+    };
     private LinearLayout layoutEffort;
     private LinearLayout layoutTier;
 
@@ -189,7 +203,6 @@ public final class ProviderSettingsDialog {
     private boolean quickSaving;
     private boolean detailsOpen;
     private boolean quickRefreshing;
-    private int quickRead;
     private ProviderItem quickProvider;
 
     public static void quick(Activity host, Runnable onChanged) {
@@ -225,7 +238,7 @@ public final class ProviderSettingsDialog {
 
     private void reloadQuick(String previewKey) {
         quickRefreshing = true;
-        if (previewKey == null) quickSheet.message("正在读取接口…");
+        quickSheet.pendingModels();
         final int gen = ++generation;
         executor.execute(() -> {
             try {
@@ -235,6 +248,7 @@ public final class ProviderSettingsDialog {
                     if (stale(gen)) return;
                     ProviderItem selected = readProviderCatalog(pref, catalog);
                     currentItem = selected;
+                    selected.quickSavedModel = curModel;
                     List<ProviderItem> available = new ArrayList<>();
                     for (ProviderItem item : providerList) {
                         if (item.isOfficial || item.local || item.hasKey) available.add(item);
@@ -247,8 +261,8 @@ public final class ProviderSettingsDialog {
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    quickRefreshing = false;
-                    quickSheet.message("无法读取接口：" + e.getMessage());
+                    quickSheet.models(java.util.Collections.emptyList(), -1, i -> {});
+                    quickSheet.retry("无法读取接口：" + e.getMessage(), () -> reloadQuick(previewKey));
                 });
             }
         });
@@ -258,39 +272,55 @@ public final class ProviderSettingsDialog {
         if (item == null || quickSaving || quickRefreshing || isDismissed) return;
         boolean samePreview = quickProvider != null && quickProvider.entryKey.equals(item.entryKey);
         quickProvider = item;
-        final int gen = generation, read = ++quickRead;
         List<String> names = new ArrayList<>();
         for (ProviderItem p : available) names.add(p.isOfficial ? officialName(p) : p.label);
         quickSheet.accounts(names, available.indexOf(item), samePreview, i -> openQuickProvider(available, available.get(i)));
-        if (!samePreview) {
-            quickSheet.models(java.util.Collections.emptyList(), -1, i -> {});
-            quickSheet.message("正在读取模型…");
+        if (item.quickChoices != null) {
+            quickModels(item, item.quickSavedModel, item.quickChoices);
+            return;
+        }
+        quickSheet.pendingModels();
+        if (item.quickReading) return;
+        item.quickReading = true;
+        final int gen = generation;
+        Runnable retry = () -> {
+            if (!stale(gen) && quickProvider == item) openQuickProvider(available, item);
+        };
+        if (item.quickSavedModel != null) {
+            readQuickModels(gen, item, item.quickSavedModel, retry);
+            return;
         }
         NativeRequests.call(host, "GET", "/api/multi/preferences?provider=" + Uri.encode(item.providerId), null, saved -> {
-            if (stale(gen) || read != quickRead) return;
-            final String model = saved.optString("model");
-            NativeRequests.call(host, "GET", modelPath(item, model), null, catalog -> {
-                if (stale(gen) || read != quickRead) return;
-                quickModels(item, model, catalog, "");
-            }, error -> {
-                if (!stale(gen) && read == quickRead) quickModels(item, model, new JSONObject(), "模型列表暂不可用");
-            });
-        }, error -> {
-            if (stale(gen) || read != quickRead) return;
-            quickSheet.models(java.util.Collections.emptyList(), -1, i -> {});
-            quickSheet.message(error);
-        });
+            if (!stale(gen)) readQuickModels(gen, item, saved.optString("model"), retry);
+        }, error -> quickReadFailed(gen, item, null, error, retry));
     }
 
-    private void quickModels(ProviderItem item, String model, JSONObject catalog, String message) {
-        List<Choice> values = options(catalog.optJSONArray("models"), model, catalog.optString("defaultModel", item.defaultModel), true);
+    private void readQuickModels(int gen, ProviderItem item, String model, Runnable retry) {
+        item.quickSavedModel = model;
+        NativeRequests.call(host, "GET", modelPath(item, model), null, catalog -> {
+            if (stale(gen)) return;
+            item.quickReading = false;
+            item.quickChoices = options(catalog.optJSONArray("models"), model, catalog.optString("defaultModel", item.defaultModel), true);
+            if (quickProvider == item) quickModels(item, model, item.quickChoices);
+        }, error -> quickReadFailed(gen, item, model, error, retry));
+    }
+
+    private void quickReadFailed(int gen, ProviderItem item, String model, String error, Runnable retry) {
+        if (stale(gen)) return;
+        item.quickReading = false;
+        if (quickProvider != item) return;
+        List<Choice> fallback = model == null ? java.util.Collections.emptyList() : options(null, model, item.defaultModel, true);
+        quickModels(item, model, fallback);
+        quickSheet.retry(error, retry);
+    }
+
+    private void quickModels(ProviderItem item, String model, List<Choice> values) {
         List<String> labels = new ArrayList<>();
         int active = -1;
         for (int i = 0; i < values.size(); i++) {
             labels.add(values.get(i).label);
             if (item == currentItem && values.get(i).id.equals(model)) active = i;
         }
-        quickSheet.message(message);
         quickSheet.models(labels, active, i -> saveQuick(item, values.get(i).id));
     }
 
@@ -387,7 +417,7 @@ public final class ProviderSettingsDialog {
 
         progressBar = new ProgressBar(ui, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setIndeterminate(true);
-        progressBar.setVisibility(View.GONE);
+        progressBar.setVisibility(View.INVISIBLE);
         root.addView(progressBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(4)));
 
@@ -403,7 +433,8 @@ public final class ProviderSettingsDialog {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
 
         LinearLayout officialCard = card();
-        officialGroup = vertical();
+        officialGroup = new PixelSelectionStrip(ui, Color.TRANSPARENT, PixelUi.color(ui, "primaryContainer"), dp(20));
+        officialGroup.setOrientation(LinearLayout.VERTICAL);
         officialCard.addView(officialGroup);
 
 
@@ -497,6 +528,10 @@ public final class ProviderSettingsDialog {
         btnCustomModel = action("输入自定义模型");
         btnCustomModel.setOnClickListener(v -> showCustomModelDialog());
         cardModel.addView(btnCustomModel);
+        retryCapabilities = action("模型列表未能更新 · 重试");
+        retryCapabilities.setVisibility(View.GONE);
+        retryCapabilities.setOnClickListener(v -> loadCapabilities());
+        cardModel.addView(retryCapabilities);
         group(scrollContent, "模型偏好", cardModel);
         group(scrollContent, "第三方接口", customGroup);
 
@@ -530,6 +565,7 @@ public final class ProviderSettingsDialog {
         stopPolling();
         if (child != null && child.isShowing()) child.dismiss();
         child = null;
+        mainHandler.removeCallbacks(showModelProgress);
         executor.shutdown();
         notifyWhenClosed();
     }
@@ -652,81 +688,84 @@ public final class ProviderSettingsDialog {
         return et;
     }
 
-    private void renderProviderRows() {
-        officialGroup.removeAllViews();
+    private static final String[] ACCOUNT_TITLES = {"Claude 登录", "ChatGPT 登录", "Google 登录"};
+    private static final String[] ACCOUNT_ENGINES = {"Claude Code", "Codex", "Antigravity"};
+    private static final String[] ACCOUNT_INITIALS = {"C", "O", "G"};
 
-        final String[] titles = {"Claude 登录", "ChatGPT 登录", "Google 登录"};
-        final String[] subtitles = {"Claude Code", "Codex", "Antigravity"};
-        final String[] monograms = {"C", "O", "G"};
-        for (ProviderItem item : providerList) {
-            if (!item.isOfficial) continue;
-            int i = item.officialType - 1;
-            final boolean isSelected = (currentItem != null && item.entryKey.equals(currentItem.entryKey));
+    private final class AccountRow extends LinearLayout {
+        final TextView mono = new TextView(ui);
+        final TextView title = new TextView(ui);
+        final TextView subtitle = new TextView(ui);
+        final RadioButton radio = new RadioButton(ui);
+        final GradientDrawable badge = new GradientDrawable();
 
-            final LinearLayout row = new LinearLayout(ui);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setMinimumHeight(dp(56));
-            row.setFocusable(true);
-            row.setClickable(true);
-            markChoice(row, titles[i] + "，" + subtitles[i], isSelected);
+        AccountRow(ProviderItem item) {
+            super(ui);
+            int index = item.officialType - 1;
+            setGravity(Gravity.CENTER_VERTICAL);
+            setMinimumHeight(dp(56));
+            setFocusable(true);
+            setBackground(PixelUi.clickable(ui, null, 20));
+            setPadding(dp(12), dp(8), dp(16), dp(8));
 
-            row.setBackground(PixelUi.clickable(ui, isSelected ? "primaryContainer" : null, 20));
-            row.setPadding(dp(12), dp(8), dp(16), dp(8));
-
-            TextView mono = new TextView(ui);
-            mono.setText(monograms[i]);
-            mono.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            mono.setText(ACCOUNT_INITIALS[index]);
+            mono.setTextSize(16);
             mono.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
             mono.setGravity(Gravity.CENTER);
-            mono.setTextColor(PixelUi.color(ui, isSelected ? "onPrimaryContainer" : "onSurfaceVariant"));
-            GradientDrawable monoBg = new GradientDrawable();
-            monoBg.setShape(GradientDrawable.OVAL);
-            monoBg.setColor(PixelUi.color(ui, isSelected ? "surface" : "surfaceContainerHigh"));
-            mono.setBackground(monoBg);
-            LinearLayout.LayoutParams monoLp = new LinearLayout.LayoutParams(dp(40), dp(40));
-            monoLp.setMarginEnd(dp(16));
-            row.addView(mono, monoLp);
+            badge.setShape(GradientDrawable.OVAL);
+            mono.setBackground(badge);
+            LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+            badgeParams.setMarginEnd(dp(16));
+            addView(mono, badgeParams);
 
-            LinearLayout textCol = new LinearLayout(ui);
-            textCol.setOrientation(LinearLayout.VERTICAL);
-            textCol.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
-
-            TextView tvTitle = new TextView(ui);
-            tvTitle.setText(titles[i]);
-            tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-            tvTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            tvTitle.setTextColor(PixelUi.color(ui, isSelected ? "onPrimaryContainer" : "onSurface"));
-            textCol.addView(tvTitle);
-
-            TextView tvSub = new TextView(ui);
-            tvSub.setText(subtitles[i]);
-            tvSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            tvSub.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
-            tvSub.setTextColor(PixelUi.color(ui, isSelected ? "onPrimaryContainer" : "onSurfaceVariant"));
-            textCol.addView(tvSub);
-
-            row.addView(textCol, textLp);
-
-            RadioButton radio = new RadioButton(ui);
+            LinearLayout labels = vertical();
+            labels.setGravity(Gravity.CENTER_VERTICAL);
+            title.setText(ACCOUNT_TITLES[index]);
+            title.setTextSize(16);
+            title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            subtitle.setText(ACCOUNT_ENGINES[index]);
+            subtitle.setTextSize(13);
+            labels.addView(title);
+            labels.addView(subtitle);
+            addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
             radio.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            radio.setChecked(isSelected);
             radio.setClickable(false);
             radio.setFocusable(false);
-            int radioTint = PixelUi.color(ui, isSelected ? "primary" : "outlineVariant");
-            radio.setButtonTintList(ColorStateList.valueOf(radioTint));
-            LinearLayout.LayoutParams radioLp = new LinearLayout.LayoutParams(dp(48), dp(48));
-            radioLp.gravity = Gravity.CENTER_VERTICAL;
-            row.addView(radio, radioLp);
+            addView(radio, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
-            row.setOnClickListener(v -> { if (item != currentItem) selectProvider(item); });
-
-            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            rowLp.setMargins(0, dp(2), 0, dp(2));
-            officialGroup.addView(row, rowLp);
+            String entryKey = item.entryKey;
+            setOnClickListener(v -> {
+                ProviderItem target = findProviderByEntryKey(entryKey);
+                if (target != null && target != currentItem) selectProvider(target);
+            });
         }
+
+        void select(boolean selected) {
+            markChoice(this, title.getText() + "，" + subtitle.getText(), selected);
+            radio.setChecked(selected);
+            radio.setButtonTintList(ColorStateList.valueOf(PixelUi.color(ui, selected ? "primary" : "outlineVariant")));
+            mono.setTextColor(PixelUi.color(ui, selected ? "onPrimaryContainer" : "onSurfaceVariant"));
+            badge.setColor(PixelUi.color(ui, selected ? "surface" : "surfaceContainerHigh"));
+            title.setTextColor(PixelUi.color(ui, selected ? "onPrimaryContainer" : "onSurface"));
+            subtitle.setTextColor(PixelUi.color(ui, selected ? "onPrimaryContainer" : "onSurfaceVariant"));
+        }
+    }
+
+    private void renderProviderRows() {
+        boolean animate = officialGroup.getChildCount() != 0;
+        if (!animate) {
+            for (ProviderItem item : providerList) {
+                if (!item.isOfficial) continue;
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+                params.setMargins(0, dp(2), 0, dp(2));
+                officialGroup.addView(new AccountRow(item), params);
+            }
+        }
+        int selected = currentItem.isOfficial ? currentItem.officialType - 1 : -1;
+        for (int i = 0; i < officialGroup.getChildCount(); i++) {
+            ((AccountRow) officialGroup.getChildAt(i)).select(i == selected);
+        }
+        officialGroup.select(selected, animate);
     }
 
     private final class SelectRow {
@@ -781,7 +820,18 @@ public final class ProviderSettingsDialog {
             chevron.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
             chevron.setTextColor(PixelUi.color(ui, "onSurfaceVariant"));
             chevron.setGravity(Gravity.CENTER);
-            view.addView(chevron, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            if ("model".equals(key)) {
+                modelChevron = chevron;
+                modelProgress = new ProgressBar(ui, null, android.R.attr.progressBarStyleSmall);
+                modelProgress.setIndeterminateTintList(ColorStateList.valueOf(PixelUi.color(ui, "primary")));
+                modelProgress.setVisibility(View.INVISIBLE);
+                FrameLayout trailing = new FrameLayout(ui);
+                trailing.addView(chevron, new FrameLayout.LayoutParams(-1, -1));
+                trailing.addView(modelProgress, new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER));
+                view.addView(trailing, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            } else {
+                view.addView(chevron, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            }
 
             view.setOnClickListener(v -> show());
         }
@@ -801,7 +851,7 @@ public final class ProviderSettingsDialog {
         }
 
         void show() {
-            if (options.isEmpty() || stale(boundGen) || currentItem != boundItem) return;
+            if (!view.isEnabled() || options.isEmpty() || stale(boundGen) || currentItem != boundItem) return;
             final int genAtShow = boundGen;
             final ProviderItem itemAtShow = boundItem;
 
@@ -950,16 +1000,18 @@ public final class ProviderSettingsDialog {
 
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     parseInitialData(prefJson, provJson);
                 });
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     layoutError.setVisibility(View.VISIBLE);
                     tvError.setText("连接本地网关失败，请重试");
-
+                    mainHandler.removeCallbacks(showModelProgress);
+                    modelProgress.setVisibility(View.INVISIBLE);
+                    modelChevron.setVisibility(View.VISIBLE);
                 });
             }
         });
@@ -1052,7 +1104,8 @@ public final class ProviderSettingsDialog {
     private void selectProviderInternal(ProviderItem item, boolean sendPreference) {
         if (item == null) return;
         final int gen = ++generation;
-        cardModel.setVisibility(View.GONE);
+        setModelControlsEnabled(false);
+        retryCapabilities.setVisibility(View.GONE);
         layoutError.setVisibility(View.GONE);
         btnSaveKey.setEnabled(true);
         btnSubmitManualCode.setEnabled(true);
@@ -1075,7 +1128,13 @@ public final class ProviderSettingsDialog {
             btnAccountAction.setContentDescription(officialName(item) + " 账号登录");
             setupAccountActions();
 
-            tvAccountStatus.setText("正在检查登录状态…");
+            JSONObject known = accountState == null ? null : accountState.optJSONObject(item.agent);
+            if (known != null && known.optJSONObject("login") == null) {
+                renderAccountState(accountState);
+            } else {
+                tvAccountStatus.setText("正在检查登录状态…");
+                btnAccountAction.setText("登录");
+            }
             btnAccountAction.setEnabled(false);
             fetchAndRenderState();
         } else {
@@ -1086,7 +1145,7 @@ public final class ProviderSettingsDialog {
         }
 
         if (sendPreference) {
-            progressBar.setVisibility(View.VISIBLE);
+            progressBar.setVisibility(View.INVISIBLE);
             executeWrite(() -> {
                 try {
                     JSONObject body = new JSONObject();
@@ -1101,7 +1160,7 @@ public final class ProviderSettingsDialog {
                     mainHandler.post(() -> {
                         hasChanges = true;
                         if (stale(gen)) return;
-                        progressBar.setVisibility(View.GONE);
+                        progressBar.setVisibility(View.INVISIBLE);
                         curModel = model;
                         curEffort = effort;
                         curServiceTier = tier;
@@ -1110,13 +1169,17 @@ public final class ProviderSettingsDialog {
                 } catch (Exception e) {
                     mainHandler.post(() -> {
                         if (stale(gen)) return;
-                        progressBar.setVisibility(View.GONE);
+                        progressBar.setVisibility(View.INVISIBLE);
                         reloadAll();
                         Toast.makeText(host, "未能切换接口", Toast.LENGTH_SHORT).show();
                     });
                 }
             });
         } else {
+            if (cardModel.getVisibility() != View.VISIBLE) {
+                bindFallbackCapabilities();
+                cardModel.setVisibility(View.VISIBLE);
+            }
             loadCapabilities();
         }
     }
@@ -1159,7 +1222,7 @@ public final class ProviderSettingsDialog {
 
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnAccountAction.setEnabled(true);
                     if (!TextUtils.isEmpty(url)) {
                         lastOAuthUri = url;
@@ -1170,7 +1233,7 @@ public final class ProviderSettingsDialog {
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnAccountAction.setEnabled(true);
                     tvAccountStatus.setText(e.getMessage());
                 });
@@ -1253,14 +1316,14 @@ public final class ProviderSettingsDialog {
                 requestHttp("POST", path, "{}");
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnAccountAction.setEnabled(true);
                     startPollingMultiState();
                 });
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnAccountAction.setEnabled(true);
                     tvAccountStatus.setText(e.getMessage());
                 });
@@ -1287,7 +1350,7 @@ public final class ProviderSettingsDialog {
 
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnSubmitManualCode.setEnabled(true);
                     etManualCode.setText("");
                     startPollingMultiState();
@@ -1295,7 +1358,7 @@ public final class ProviderSettingsDialog {
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnSubmitManualCode.setEnabled(true);
                     Toast.makeText(host, "提交授权码失败，请重试", Toast.LENGTH_SHORT).show();
                 });
@@ -1372,6 +1435,7 @@ public final class ProviderSettingsDialog {
 
     private void renderAccountState(JSONObject state) {
         if (currentItem == null || !currentItem.isOfficial || state == null) return;
+        accountState = state;
 
         if (currentItem.officialType == TYPE_CLAUDE) {
             JSONObject c = state.optJSONObject("claude");
@@ -1520,32 +1584,52 @@ public final class ProviderSettingsDialog {
         }
     }
 
+    private void setModelControlsEnabled(boolean enabled) {
+        mainHandler.removeCallbacks(showModelProgress);
+        modelChevron.setVisibility(View.VISIBLE);
+        modelProgress.setVisibility(View.INVISIBLE);
+        if (!enabled) mainHandler.postDelayed(showModelProgress, 350);
+        modelRow.view.setEnabled(enabled);
+        effortRow.view.setEnabled(enabled);
+        tierRow.view.setEnabled(enabled);
+        btnCustomModel.setEnabled(enabled);
+    }
+
     private void loadCapabilities() {
         if (currentItem == null) return;
         final int gen = generation;
         final int read = ++modelRead;
         final ProviderItem item = currentItem;
-        final String modelParam = curModel;
-
-        executor.execute(() -> {
-            try {
-                String resp = requestHttp("GET", modelPath(item, modelParam), null);
-                JSONObject obj = new JSONObject(resp);
-
-                mainHandler.post(() -> {
-                    if (stale(gen) || read != modelRead || !modelParam.equals(curModel)) return;
-                    cardModel.setVisibility(View.VISIBLE);
-                    bindCapabilities(obj);
-                });
-            } catch (Exception e) {
-                mainHandler.post(() -> {
-                    if (stale(gen) || read != modelRead || !modelParam.equals(curModel)) return;
-                    cardModel.setVisibility(View.VISIBLE);
-                    bindFallbackCapabilities();
-                    showError("读取模型能力失败，请重试");
-                });
+        final String model = curModel;
+        boolean cached = model.equals(item.capabilitiesModel) && item.capabilities != null;
+        if (cached) {
+            bindCapabilities(item.capabilities);
+            setModelControlsEnabled(true);
+        }
+        retryCapabilities.setEnabled(false);
+        // Keep the last layout on screen until the selected provider's catalog is ready.
+        // Reads can overlap. Preference writes remain ordered on the single writer.
+        Runnable failed = () -> {
+            if (stale(gen) || read != modelRead || !model.equals(curModel)) return;
+            if (!cached) bindFallbackCapabilities();
+            cardModel.setVisibility(View.VISIBLE);
+            setModelControlsEnabled(true);
+            retryCapabilities.setEnabled(true);
+            retryCapabilities.setVisibility(View.VISIBLE);
+        };
+        NativeRequests.call(host, "GET", modelPath(item, model), null, result -> {
+            if (stale(gen) || read != modelRead || !model.equals(curModel)) return;
+            if (result.has("ok") && !result.optBoolean("ok")) {
+                failed.run();
+                return;
             }
-        });
+            item.capabilitiesModel = model;
+            item.capabilities = result;
+            bindCapabilities(result);
+            setModelControlsEnabled(true);
+            cardModel.setVisibility(View.VISIBLE);
+            retryCapabilities.setVisibility(View.GONE);
+        }, error -> failed.run());
     }
 
     private void bindCapabilities(JSONObject obj) {
@@ -1589,8 +1673,9 @@ public final class ProviderSettingsDialog {
 
         final String model = curModel;
         if ("model".equals(key)) {
-            layoutEffort.setVisibility(View.GONE);
-            layoutTier.setVisibility(View.GONE);
+            ++modelRead;
+            setModelControlsEnabled(false);
+            retryCapabilities.setVisibility(View.GONE);
         }
         executeWrite(() -> {
             try {
@@ -1615,11 +1700,6 @@ public final class ProviderSettingsDialog {
         });
     }
 
-    private void showError(String message) {
-        layoutError.setVisibility(View.VISIBLE);
-        tvError.setText(message);
-    }
-
     private void saveApiKey() {
         if (currentItem == null || currentItem.isOfficial) return;
         final ProviderItem target = currentItem;
@@ -1642,9 +1722,12 @@ public final class ProviderSettingsDialog {
                 mainHandler.post(() -> {
                     hasChanges = true;
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnSaveKey.setEnabled(true);
-                    currentItem.hasKey = true;
+                    target.hasKey = true;
+                    target.capabilities = null;
+                    setModelControlsEnabled(false);
+                    loadCapabilities();
                     tvKeyStatus.setText("已配置 API 密钥");
                     etApiKey.setText("");
                     Toast.makeText(host, "密钥已保存", Toast.LENGTH_SHORT).show();
@@ -1652,7 +1735,7 @@ public final class ProviderSettingsDialog {
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     btnSaveKey.setEnabled(true);
                     Toast.makeText(host, "保存密钥失败，请重试", Toast.LENGTH_SHORT).show();
                 });
@@ -1691,7 +1774,7 @@ public final class ProviderSettingsDialog {
                 mainHandler.post(() -> {
                     hasChanges = true;
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     providerList.add(newItem);
                     selectProvider(newItem);
                     Toast.makeText(host, "已添加并切换至 " + label, Toast.LENGTH_SHORT).show();
@@ -1699,7 +1782,7 @@ public final class ProviderSettingsDialog {
             } catch (Exception e) {
                 mainHandler.post(() -> {
                     if (stale(gen)) return;
-                    progressBar.setVisibility(View.GONE);
+                    progressBar.setVisibility(View.INVISIBLE);
                     Toast.makeText(host, "添加自定义厂商失败", Toast.LENGTH_SHORT).show();
                 });
             }

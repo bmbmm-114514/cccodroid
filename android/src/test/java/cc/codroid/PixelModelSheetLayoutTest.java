@@ -1,10 +1,19 @@
 package cc.codroid;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.content.res.TypedArray;
+import android.graphics.Matrix;
 import android.graphics.Rect;
+import android.graphics.RectF;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.Animation;
+import android.view.animation.AnimationUtils;
+import android.view.animation.Transformation;
 import android.widget.HorizontalScrollView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import androidx.core.widget.NestedScrollView;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
@@ -16,6 +25,9 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.GraphicsMode;
 import org.robolectric.shadows.ShadowDialog;
+import org.robolectric.util.ReflectionHelpers;
+import java.time.Duration;
+import static org.robolectric.Shadows.shadowOf;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -49,8 +61,7 @@ public class PixelModelSheetLayoutTest {
     private void select(int account) {
         boolean samePreview = preview.getAndSet(account) == account;
         sheet.accounts(accounts, account, samePreview, this::select);
-        sheet.models(Collections.emptyList(), -1, i -> {});
-        sheet.message("正在读取模型…");
+        sheet.pendingModels();
     }
 
     private void models(int count) {
@@ -112,10 +123,10 @@ public class PixelModelSheetLayoutTest {
             assertSame(local, label(accounts.get(3)));
             assertEquals(initialLocal, bounds(local));
             assertEquals(horizontalScroll, tabs.getScrollX());
-            assertEquals(0, list.getScrollY());
             int count = provider == 3 ? 1 : provider == 2 ? 5 : 28;
             models(count);
             layout(width, height);
+            assertEquals(0, list.getScrollY());
             assertEquals(initialSheet, bounds(surface));
             assertEquals(initialLocal, bounds(local));
             assertEquals(count == 28, list.canScrollVertically(1));
@@ -142,6 +153,127 @@ public class PixelModelSheetLayoutTest {
         sheet.busy(false);
         firstModel.performClick();
         assertEquals(1, saves.get());
+    }
+
+    @Test public void slowPreviewPreservesRowsAndScrollAndDiscardsStaleTaps() {
+        open();
+        models(28);
+        layout(360, 800);
+        View old = (View) label("Model 15").getParent();
+        NestedScrollView list = ancestor(old, NestedScrollView.class);
+        list.scrollTo(0, 240);
+        label("Google").performClick();
+        assertSame(old, label("Model 15").getParent());
+        assertEquals(240, list.getScrollY());
+        assertFalse(old.isEnabled());
+        old.performClick();
+        assertEquals(0, saves.get());
+        ProgressBar progress = ReflectionHelpers.getField(sheet, "progressBar");
+        assertEquals(View.INVISIBLE, progress.getVisibility());
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
+        assertEquals(View.VISIBLE, progress.getVisibility());
+        models(2);
+        assertEquals(0, list.getScrollY());
+        assertEquals(View.INVISIBLE, progress.getVisibility());
+        assertNull(old.getParent());
+        old.performClick();
+        assertEquals(0, saves.get());
+        ((View) label("Model 1").getParent()).performClick();
+        assertEquals(1, saves.get());
+
+        label("Claude").performClick();
+        models(28);
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
+        assertEquals(View.INVISIBLE, progress.getVisibility());
+        label("Google").performClick();
+        sheet.dismiss();
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
+        assertEquals(View.INVISIBLE, progress.getVisibility());
+    }
+
+    @Test public void highlightRetargetsFromItsCurrentFrameAndModelsSlideOnAnOpaqueSurface() {
+        open();
+        shadowOf(Looper.getMainLooper()).idle();
+        models(3);
+        layout(360, 800);
+        PixelSelectionStrip strip = ancestor(label("Claude"), PixelSelectionStrip.class);
+        RectF highlight = ReflectionHelpers.getField(strip, "current");
+        float from = highlight.left;
+        label("Google").performClick();
+        ValueAnimator forward = ReflectionHelpers.getField(strip, "motion");
+        assertNotNull(forward);
+        forward.setCurrentFraction(.3f);
+        float mid = highlight.left;
+        assertTrue(from < mid && mid < label("Google").getLeft());
+
+        label("ChatGPT").performClick();
+        ValueAnimator redirected = ReflectionHelpers.getField(strip, "motion");
+        assertNotSame(redirected, forward);
+        assertEquals(mid, highlight.left, .01f);
+        redirected.end();
+        assertEquals(label("ChatGPT").getLeft(), highlight.left, .01f);
+        models(2);
+        ValueAnimator slide = ReflectionHelpers.getField(sheet, "modelMotion");
+        assertNotNull(slide);
+        View rows = (View) label("Model 0").getParent().getParent();
+        float firstOffset = rows.getTranslationX();
+        assertTrue(firstOffset > 0);
+        slide.setCurrentFraction(.35f);
+        assertTrue(rows.getTranslationX() > 0 && rows.getTranslationX() < firstOffset);
+        assertEquals(1f, rows.getAlpha(), 0);
+        assertEquals(255, android.graphics.Color.alpha(surface.getBackgroundTintList().getDefaultColor()));
+        slide.end();
+        assertEquals(0f, rows.getTranslationX(), .01f);
+        label("Claude").performClick();
+        models(3);
+        assertTrue(rows.getTranslationX() < 0);
+    }
+
+    @Test public void sheetWindowEntersByTranslationAtFullOpacity() {
+        open();
+        int style = dialog.getWindow().getAttributes().windowAnimations;
+        TypedArray attrs = dialog.getContext().obtainStyledAttributes(style,
+                new int[]{android.R.attr.windowEnterAnimation});
+        int resource = attrs.getResourceId(0, 0);
+        attrs.recycle();
+        assertTrue(resource != 0);
+        Animation enter = AnimationUtils.loadAnimation(dialog.getContext(), resource);
+        enter.initialize(360, 800, 360, 800);
+        enter.setStartTime(0L);
+        float[] matrix = new float[9];
+        float previous = Float.POSITIVE_INFINITY;
+        for (long time : new long[]{0L, enter.getDuration() / 2, enter.getDuration()}) {
+            Transformation frame = new Transformation();
+            enter.getTransformation(time, frame);
+            assertEquals(1f, frame.getAlpha(), 0f);
+            frame.getMatrix().getValues(matrix);
+            assertTrue(matrix[Matrix.MTRANS_Y] < previous);
+            previous = matrix[Matrix.MTRANS_Y];
+        }
+        assertEquals(0f, previous, .01f);
+    }
+
+    @Test public void zeroAnimationScaleImmediatelySettlesBothSelections() {
+        float previousScale = ValueAnimator.getDurationScale();
+        ReflectionHelpers.callStaticMethod(ValueAnimator.class, "setDurationScale",
+                ReflectionHelpers.ClassParameter.from(float.class, 0f));
+        try {
+            open();
+            shadowOf(Looper.getMainLooper()).idle();
+            models(3);
+            layout(360, 800);
+            PixelSelectionStrip strip = ancestor(label("Claude"), PixelSelectionStrip.class);
+            label("Google").performClick();
+            models(6);
+            assertNull(ReflectionHelpers.getField(strip, "motion"));
+            assertNull(ReflectionHelpers.getField(sheet, "modelMotion"));
+            RectF rect = ReflectionHelpers.getField(strip, "current");
+            assertEquals(label("Google").getLeft(), rect.left, .01f);
+            assertEquals(0f, ((View) label("Model 5").getParent().getParent()).getTranslationX(), 0);
+        } finally {
+            ReflectionHelpers.callStaticMethod(ValueAnimator.class, "setDurationScale",
+                    ReflectionHelpers.ClassParameter.from(float.class, previousScale));
+        }
     }
 
     @Test public void rotationAndLargeTypeKeepScrollableStatusAndModelsBelowTheTabs() {

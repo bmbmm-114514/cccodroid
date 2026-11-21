@@ -19,11 +19,13 @@ import android.widget.TextView;
 /** The toolbar and content move together. The tab bar and rail stay anchored. */
 final class PixelPageMotion {
     private static final PathInterpolator EASE = new PathInterpolator(.2f, 0f, 0f, 1f);
-    private final FrameLayout preview;
+    private final FrameLayout viewport, preview;
     private final View page;
     private final ImageView image;
     private final TextView title;
     private ValueAnimator transition;
+    private String slideFrom;
+    private float slideProgress;
     private float progress;
     private boolean fromRight;
     private boolean tracking;
@@ -34,6 +36,8 @@ final class PixelPageMotion {
 
     PixelPageMotion(FrameLayout viewport, View page) {
         this.page = page;
+        this.viewport = viewport;
+        viewport.setClipChildren(true);
         Context c = page.getContext();
         int surface = PixelUi.color(c, "surface");
         viewport.setBackgroundColor(surface);
@@ -63,9 +67,32 @@ final class PixelPageMotion {
         return page.getWidth() > 0 && page.getHeight() > 0 && ValueAnimator.areAnimatorsEnabled();
     }
 
-    void capture(String route) {
-        if (!enabled() || route.isEmpty()) return;
-        int w = page.getWidth(), h = page.getHeight();
+    static final class TabStart {
+        private static final TabStart FIRST = new TabStart(0f, null);
+        final float progress;
+        final Bitmap composite;
+
+        TabStart(float progress, Bitmap composite) {
+            this.progress = progress;
+            this.composite = composite;
+        }
+    }
+
+    TabStart capture(String route, String destination, boolean tab) {
+        if (!enabled() || route.isEmpty()) return tab ? TabStart.FIRST : null;
+        Bitmap frame = snapshot(page);
+        if (frame != null) frames.put(route, frame);
+        else frames.remove(route);
+        if (!tab) return null;
+        if (transition == null) return TabStart.FIRST;
+        if (destination.equals(slideFrom)) return new TabStart(1f - slideProgress, null);
+        // A third destination joins mid-slide. Start with exactly what is on screen.
+        return new TabStart(0f, snapshot(viewport));
+    }
+
+    private Bitmap snapshot(View view) {
+        int w = view.getWidth(), h = view.getHeight();
+        if (w <= 0 || h <= 0) return null;
         // The preview is transient and never written to disk. Bound memory on large/foldable displays.
         float scale = Math.min(1f, (float) Math.sqrt(450000d / ((double) w * h)));
         Bitmap frame = Bitmap.createBitmap(Math.max(1, Math.round(w * scale)),
@@ -73,12 +100,12 @@ final class PixelPageMotion {
         Canvas canvas = new Canvas(frame);
         canvas.scale(scale, scale);
         try {
-            page.draw(canvas);
-            frames.put(route, frame);
+            view.draw(canvas);
+            return frame;
         } catch (IllegalArgumentException | IllegalStateException hardwareOnly) {
             // Software Canvas cannot draw a hardware-only image from some document previews.
             frame.recycle();
-            frames.remove(route);
+            return null;
         }
     }
 
@@ -129,13 +156,29 @@ final class PixelPageMotion {
         animateFrames(150, f -> transform(page, start * (1f - EASE.getInterpolation(f)), fromRight));
     }
 
-    void navigate(String oldRoute, String oldTitle, boolean back, boolean interactive, int direction) {
+    void navigate(String oldRoute, String oldTitle, boolean back, boolean interactive, int direction, TabStart tab) {
         float initial = interactive && tracking ? progress : 0f;
         boolean right = interactive && tracking ? fromRight : direction < 0;
         reset();
         if (oldRoute.isEmpty() || !enabled()) return;
         showFrame(oldRoute, oldTitle);
-        if (back && interactive) {
+        if (tab != null) {
+            page.bringToFront();
+            if (tab.composite != null) {
+                image.setImageBitmap(tab.composite);
+                title.setVisibility(View.GONE);
+            }
+            if (tab.progress >= 1f) { reset(); return; }
+            // A composite can contain portions of multiple routes and cannot be reversed as one route.
+            slideFrom = tab.composite == null ? oldRoute : "";
+            animateFrames(Math.max(1L, Math.round(300f * (1f - tab.progress))), fraction -> {
+                slideProgress = tab.progress + (1f - tab.progress) * EASE.getInterpolation(fraction);
+                int width = viewport.getWidth();
+                int travelled = Math.round(width * slideProgress);
+                preview.setTranslationX(-direction * travelled);
+                page.setTranslationX(direction * (width - travelled));
+            });
+        } else if (back && interactive) {
             preview.bringToFront();
             transform(preview, initial, right);
             float startX = preview.getTranslationX();
@@ -190,6 +233,8 @@ final class PixelPageMotion {
         tracking = false;
         progress = 0f;
         corner = 0f;
+        slideFrom = null;
+        slideProgress = 0f;
         image.setImageDrawable(null);
         preview.setVisibility(View.INVISIBLE);
         page.bringToFront();

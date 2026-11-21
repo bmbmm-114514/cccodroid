@@ -216,7 +216,8 @@ public class NativeHome {
         String previous = screen;
         String previousTitle = getScreenTitle(previous);
         boolean changing = !previous.equals(id);
-        if (changing) motion.capture(previous);
+        boolean tabSwitch = selectingTab || (isNavigatingBack && !committingGesture && primary(previous) && primary(id));
+        PixelPageMotion.TabStart tab = changing ? motion.capture(previous, id, tabSwitch) : null;
         if (!committingGesture) motion.reset();
         if (!isNavigatingBack && screen != null && !screen.isEmpty() && !screen.equals(id)) {
             history.push(screen);
@@ -229,8 +230,8 @@ public class NativeHome {
         renderScreen(id);
         if (changing) {
             int direction = a.getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? -1 : 1;
-            if (selectingTab && PixelNav.tabIndex(id) < PixelNav.tabIndex(previous)) direction = -direction;
-            motion.navigate(previous, previousTitle, isNavigatingBack && !selectingTab, committingGesture, direction);
+            if (tabSwitch && PixelNav.tabIndex(id) < PixelNav.tabIndex(previous)) direction = -direction;
+            motion.navigate(previous, previousTitle, isNavigatingBack && !selectingTab, committingGesture, direction, tab);
         }
         syncBack();
     }

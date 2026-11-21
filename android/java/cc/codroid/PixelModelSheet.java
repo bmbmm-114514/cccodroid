@@ -1,5 +1,6 @@
 package cc.codroid;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import android.content.Context;
@@ -30,11 +31,18 @@ final class PixelModelSheet {
     private final BottomSheetDialog dialog;
 
     private final LinearLayout sheetView;
-    private final LinearLayout accountsContainer;
+    private final PixelSelectionStrip accountsContainer;
     private final LinearLayout modelsContainer;
     private final NestedScrollView modelScroll;
     private final TextView messageView;
     private final ProgressBar progressBar;
+
+    private final TextView retryButton;
+    private final Runnable showProgress = this::showSlowProgress;
+    private boolean pending;
+    private boolean slowRequest;
+    private int renderedAccount = -1;
+    private ValueAnimator modelMotion;
 
     private List<String> currentAccounts;
     private int selectedAccount = -1;
@@ -85,7 +93,8 @@ final class PixelModelSheet {
         HorizontalScrollView hScroll = new HorizontalScrollView(ui);
         hScroll.setHorizontalScrollBarEnabled(false);
         hScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        accountsContainer = new LinearLayout(ui);
+        accountsContainer = new PixelSelectionStrip(ui, PixelUi.color(ui, "surfaceContainerHigh"),
+                PixelUi.color(ui, "primaryContainer"), dp(18));
         accountsContainer.setOrientation(LinearLayout.HORIZONTAL);
         accountsContainer.setPadding(dp(16), dp(4), dp(16), dp(8));
         hScroll.addView(accountsContainer, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -97,7 +106,9 @@ final class PixelModelSheet {
 
         progressBar = new ProgressBar(ui, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setIndeterminate(true);
-        progressBar.setVisibility(View.GONE);
+        progressBar.setIndeterminateTintList(ColorStateList.valueOf(PixelUi.color(ui, "primary")));
+        progressBar.setContentDescription("正在获取模型列表");
+        progressBar.setVisibility(View.INVISIBLE);
         LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4));
         sheetView.addView(progressBar, progressLp);
 
@@ -112,6 +123,13 @@ final class PixelModelSheet {
         messageView.setPadding(dp(20), dp(4), dp(20), dp(8));
         messageView.setVisibility(View.GONE);
         body.addView(messageView);
+        retryButton = PixelUi.button(ui, "重试", () -> {});
+        retryButton.setMinimumHeight(dp(48));
+        retryButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams retryParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        retryParams.setMarginStart(dp(20));
+        body.addView(retryButton, retryParams);
 
         modelsContainer = new LinearLayout(ui);
         modelsContainer.setOrientation(LinearLayout.VERTICAL);
@@ -122,7 +140,13 @@ final class PixelModelSheet {
 
         dialog.setContentView(sheetView);
         PixelChoiceSheet.configure(dialog, ui, 560);
-        ProviderSettingsDialog.watchWindow(dialog, close);
+        dialog.getWindow().setWindowAnimations(cc.agentui.R.style.PixelModelSheetWindowMotion);
+        View surface = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
+        surface.setBackgroundTintList(ColorStateList.valueOf(PixelUi.color(ui, "surfaceContainerLow") | 0xff000000));
+        ProviderSettingsDialog.watchWindow(dialog, () -> {
+            stopUpdates();
+            close.run();
+        });
     }
 
     public void present() {
@@ -136,27 +160,105 @@ final class PixelModelSheet {
         boolean sameLabels = Objects.equals(currentAccounts, labels);
         int previous = selectedAccount;
         currentAccounts = labels;
+        if (samePreview && previous >= 0 && renderedAccount == previous) renderedAccount = selected;
         selectedAccount = selected;
         accountConsumer = choose;
         if (sameLabels) {
             if (selected != previous) {
                 styleAccount(previous);
                 styleAccount(selected);
+                accountsContainer.select(selected, true);
             }
         } else {
             rebuildAccounts();
         }
-        if (!samePreview) modelScroll.scrollTo(0, 0);
     }
 
     void models(List<String> labels, int selected, java.util.function.IntConsumer choose) {
-        this.currentModels = labels;
-        this.selectedModel = selected;
-        this.modelConsumer = choose;
+        int previous = renderedAccount;
+        boolean changedAccount = previous != selectedAccount;
+        boolean sameRows = !changedAccount && selectedModel == selected && Objects.equals(currentModels, labels);
+        setPending(false);
+        currentModels = labels;
+        selectedModel = selected;
+        modelConsumer = choose;
+        renderedAccount = selectedAccount;
+        if (sameRows) return;
         rebuildModels();
+        if (changedAccount) {
+            modelScroll.scrollTo(0, 0);
+            stopModelMotion();
+            if (previous >= 0 && modelScroll.isLaidOut() && dialog.isShowing()
+                    && ValueAnimator.areAnimatorsEnabled() && modelsContainer.getChildCount() > 0) {
+                int direction = selectedAccount > previous ? 1 : -1;
+                if (sheetView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) direction = -direction;
+                float distance = dp(40) * direction;
+                modelsContainer.setTranslationX(distance);
+                modelMotion = ValueAnimator.ofFloat(distance, 0f);
+                modelMotion.setDuration(240);
+                modelMotion.setInterpolator(PixelSelectionStrip.EASING);
+                modelMotion.addUpdateListener(a -> modelsContainer.setTranslationX((float) a.getAnimatedValue()));
+                modelMotion.start();
+            }
+        }
+    }
+
+    void pendingModels() {
+        modelConsumer = null;
+        message("");
+        setPending(true);
+    }
+
+    private void setPending(boolean value) {
+        sheetView.removeCallbacks(showProgress);
+        if (pending != value) {
+            modelsContainer.setImportantForAccessibility(value ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+            for (int i = 0; i < modelsContainer.getChildCount(); i++) {
+                modelsContainer.getChildAt(i).setEnabled(!value);
+            }
+        }
+        pending = value;
+        slowRequest = false;
+        updateProgress();
+        if (value) sheetView.postDelayed(showProgress, 350);
+    }
+
+    private void showSlowProgress() {
+        if (pending && dialog.isShowing()) {
+            slowRequest = true;
+            updateProgress();
+        }
+    }
+
+    private void updateProgress() {
+        progressBar.setVisibility(saving || slowRequest ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    private void stopModelMotion() {
+        if (modelMotion != null) modelMotion.cancel();
+        modelMotion = null;
+        modelsContainer.setTranslationX(0f);
+    }
+
+    private void stopUpdates() {
+        setPending(false);
+        modelConsumer = null;
+        accountConsumer = null;
+        stopModelMotion();
+    }
+
+    void retry(String text, Runnable action) {
+        message(text);
+        retryButton.setVisibility(View.VISIBLE);
+        retryButton.setOnClickListener(v -> {
+            if (!saving && dialog.isShowing()) action.run();
+        });
     }
 
     void message(String text) {
+        retryButton.setVisibility(View.GONE);
+        retryButton.setOnClickListener(null);
         if (text == null || text.trim().isEmpty()) {
             messageView.setVisibility(View.GONE);
         } else {
@@ -168,13 +270,14 @@ final class PixelModelSheet {
     }
 
     void busy(boolean loading) {
-        progressBar.setVisibility(loading ? View.VISIBLE : View.GONE);
         saving = loading;
+        updateProgress();
         dialog.setCancelable(!loading);
         dialog.getBehavior().setDraggable(!loading);
     }
 
     public void dismiss() {
+        stopUpdates();
         if (dialog.isShowing()) {
             dialog.setCancelable(true);
             dialog.cancel();
@@ -182,6 +285,7 @@ final class PixelModelSheet {
     }
 
     private void rebuildAccounts() {
+        accountsContainer.select(-1, false);
         accountsContainer.removeAllViews();
         if (currentAccounts == null || currentAccounts.isEmpty()) {
             ((View) accountsContainer.getParent()).setVisibility(View.GONE);
@@ -202,9 +306,10 @@ final class PixelModelSheet {
             chip.setPadding(dp(16), dp(6), dp(16), dp(6));
             chip.setMinimumHeight(dp(48));
 
+            chip.setBackground(createTonalRipple(Color.TRANSPARENT, PixelUi.color(ui, "primary"), dp(18)));
             chip.setFocusable(true);
             chip.setOnClickListener(v -> {
-                if (saving || index == selectedAccount) return;
+                if (saving || index == selectedAccount || v.getParent() != accountsContainer) return;
                 if (accountConsumer != null) {
                     accountConsumer.accept(index);
                 }
@@ -215,17 +320,16 @@ final class PixelModelSheet {
             accountsContainer.addView(chip, lp);
             styleAccount(i);
         }
+        accountsContainer.select(selectedAccount, false);
     }
 
     private void styleAccount(int index) {
         if (index < 0 || index >= accountsContainer.getChildCount()) return;
         TextView chip = (TextView) accountsContainer.getChildAt(index);
         boolean selected = (index == selectedAccount);
-        int backgroundColor = PixelUi.color(ui, selected ? "primaryContainer" : "surfaceContainerHigh");
         int textColor = PixelUi.color(ui, selected ? "onPrimaryContainer" : "onSurfaceVariant");
 
         chip.setTextColor(textColor);
-        chip.setBackground(createTonalRipple(backgroundColor, PixelUi.color(ui, "primary"), dp(18)));
 
         ProviderSettingsDialog.markChoice(chip, currentAccounts.get(index), selected);
     }
@@ -268,7 +372,7 @@ final class PixelModelSheet {
 
             ProviderSettingsDialog.markChoice(row, label, isSelected);
             row.setOnClickListener(v -> {
-                if (saving) return;
+                if (saving || pending || v.getParent() != modelsContainer) return;
                 if (modelConsumer != null) {
                     modelConsumer.accept(index);
                 }

@@ -18,12 +18,16 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -43,6 +47,7 @@ public class ProviderSettingsReturnTest {
     @Implements(value = Env.class, isInAndroidSdk = false)
     public static class Gateway {
         static volatile String active = "anthropic";
+        static volatile JSONObject lastWrite;
         static final AtomicInteger writes = new AtomicInteger();
         static CountDownLatch allowSave = new CountDownLatch(1);
 
@@ -53,7 +58,8 @@ public class ProviderSettingsReturnTest {
                 if ("POST".equals(method)) {
                     writes.incrementAndGet();
                     if (!allowSave.await(8, TimeUnit.SECONDS)) throw new AssertionError("save not released");
-                    active = new JSONObject(new String(body, StandardCharsets.UTF_8)).getString("provider");
+                    lastWrite = new JSONObject(new String(body, StandardCharsets.UTF_8));
+                    active = lastWrite.getString("provider");
                 }
                 result.put("provider", active);
                 result.put("agent", "chatgpt".equals(active) ? "codex" : "claude");
@@ -79,6 +85,114 @@ public class ProviderSettingsReturnTest {
         }
     }
 
+    @Implements(value = NativeRequests.class, isInAndroidSdk = false)
+    public static class CatalogRequests {
+        static final Map<String, Consumer<JSONObject>> success = new HashMap<>();
+        static final Map<String, Consumer<String>> failure = new HashMap<>();
+        static int count;
+
+        @Implementation
+        protected static void call(Activity activity, String verb, String path, JSONObject body,
+                                   Consumer<JSONObject> result, Consumer<String> error) {
+            assertEquals("GET", verb);
+            assertNull("Duplicate in-flight read " + path, success.put(path, result));
+            failure.put(path, error);
+            count++;
+        }
+
+        static void complete(String path, JSONObject result) {
+            failure.remove(path);
+            assertNotNull("Expected read " + path, success.get(path));
+            success.remove(path).accept(result);
+        }
+
+        static void failRead(String path, String message) {
+            success.remove(path);
+            assertNotNull("Expected read " + path, failure.get(path));
+            failure.remove(path).accept(message);
+        }
+    }
+
+    private static final String CLAUDE = "/api/multi/models?agent=claude&model=&provider=anthropic";
+    private static final String GPT_PREFS = "/api/multi/preferences?provider=chatgpt";
+    private static final String GOOGLE_PREFS = "/api/multi/preferences?provider=google";
+    private static final String GPT = "/api/multi/models?agent=codex&model=gpt-5&provider=chatgpt";
+    private static final String GEMINI = "/api/multi/models?agent=agy&model=&provider=google";
+
+    @Before public void resetGateway() {
+        Gateway.active = "anthropic";
+        Gateway.writes.set(0);
+        Gateway.allowSave = new CountDownLatch(1);
+        Gateway.lastWrite = null;
+        CatalogRequests.success.clear();
+        CatalogRequests.failure.clear();
+        CatalogRequests.count = 0;
+    }
+
+    private static JSONObject catalog(String id, String label) throws Exception {
+        return new JSONObject().put("models", new JSONArray().put(new JSONObject().put("id", id).put("label", label)));
+    }
+
+    @Test @Config(shadows = {Gateway.class, CatalogRequests.class})
+    public void switchingAccountsKeepsRowsAndCoalescesCatalogsUntilAUserPicksAModel() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        AtomicInteger changes = new AtomicInteger();
+        ProviderSettingsDialog.quick(activity, changes::incrementAndGet);
+        BottomSheetDialog quick = (BottomSheetDialog) ShadowDialog.getLatestDialog();
+        await(() -> CatalogRequests.success.containsKey(CLAUDE));
+        CatalogRequests.complete(CLAUDE, catalog("sonnet", "Sonnet"));
+        View previous = find(quick, "Sonnet");
+        assertNotNull(previous);
+        tap(quick, "ChatGPT");
+        assertSame(previous, find(quick, "Sonnet"));
+        assertNull(find(quick, "正在读取模型…"));
+        previous.performClick();
+        tap(quick, "Google");
+        tap(quick, "ChatGPT");
+        CatalogRequests.complete(GOOGLE_PREFS, new JSONObject());
+        CatalogRequests.complete(GEMINI, catalog("gemini-pro", "Gemini Pro"));
+        assertSame(previous, find(quick, "Sonnet"));
+        assertNull(find(quick, "Gemini Pro"));
+        CatalogRequests.complete(GPT_PREFS, new JSONObject().put("model", "gpt-5"));
+        CatalogRequests.complete(GPT, catalog("gpt-5", "GPT 5"));
+        assertNotNull(find(quick, "GPT 5"));
+        tap(quick, "Google");
+        assertNotNull(find(quick, "Gemini Pro"));
+        assertEquals(5, CatalogRequests.count);
+        previous.performClick();
+        assertEquals(0, Gateway.writes.get());
+        Gateway.allowSave.countDown();
+        tap(quick, "Gemini Pro");
+        await(() -> changes.get() == 1);
+        assertEquals(1, Gateway.writes.get());
+        assertEquals("agy", Gateway.lastWrite.getString("agent"));
+        assertEquals("google", Gateway.lastWrite.getString("provider"));
+        assertEquals("gemini-pro", Gateway.lastWrite.getString("model"));
+    }
+
+    @Test @Config(shadows = {Gateway.class, CatalogRequests.class})
+    public void failedPreferenceAndCatalogReadsCanRetryWithoutCommittingAFallback() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        ProviderSettingsDialog.quick(activity, null);
+        BottomSheetDialog quick = (BottomSheetDialog) ShadowDialog.getLatestDialog();
+        await(() -> CatalogRequests.success.containsKey(CLAUDE));
+        CatalogRequests.complete(CLAUDE, catalog("sonnet", "Sonnet"));
+        tap(quick, "ChatGPT");
+        CatalogRequests.failRead(GPT_PREFS, "接口暂不可用");
+        assertNull(find(quick, "Sonnet"));
+        tap(quick, "重试");
+        JSONObject saved = new JSONObject().put("model", "gpt-5");
+        CatalogRequests.complete(GPT_PREFS, saved);
+        CatalogRequests.failRead(GPT, "目录暂不可用");
+        assertNotNull(find(quick, "gpt-5（自定义）"));
+        tap(quick, "重试");
+        CatalogRequests.complete(GPT, catalog("gpt-5", "GPT 5"));
+        assertNotNull(find(quick, "GPT 5"));
+        assertNull(find(quick, "重试"));
+        close(quick);
+        assertEquals(0, Gateway.writes.get());
+    }
+
     @Test public void cancellingSettingsOverPreviewRetainsSheetScrollAndDraft() throws Exception {
         ActivityController<Activity> controller = Robolectric.buildActivity(Activity.class).setup();
         Activity activity = controller.get();
@@ -89,7 +203,9 @@ public class ProviderSettingsReturnTest {
         AtomicInteger changes = new AtomicInteger();
         ProviderSettingsDialog.quick(activity, changes::incrementAndGet);
         BottomSheetDialog quick = (BottomSheetDialog) ShadowDialog.getLatestDialog();
+        await(() -> find(quick, "Claude 0") != null);
         tap(quick, "ChatGPT");
+        assertNotNull(find(quick, "Claude 0"));
         await(() -> find(quick, "Codex 15") != null);
         NestedScrollView list = scroll(find(quick, "Codex 15"));
         View root = quick.getWindow().getDecorView();
@@ -149,6 +265,56 @@ public class ProviderSettingsReturnTest {
         close(quick);
         await(() -> changes.get() == 1);
         assertEquals(1, Gateway.writes.get());
+    }
+
+    @Test @Config(shadows = {Gateway.class, CatalogRequests.class})
+    public void fullSettingsRetainsRowsDuringReadsAndRetriesErrorsWithinModelCard() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        ProviderSettingsDialog.show(activity, null);
+        Dialog page = ShadowDialog.getLatestDialog();
+        String state = "/api/multi/state";
+        String codex = "/api/multi/models?agent=codex&model=&provider=chatgpt";
+        JSONObject accounts = new JSONObject().put("claude", new JSONObject())
+                .put("codex", new JSONObject()).put("agy", new JSONObject());
+        await(() -> CatalogRequests.success.containsKey(CLAUDE));
+        CatalogRequests.complete(state, accounts);
+        CatalogRequests.complete(CLAUDE, catalog("sonnet", "Sonnet").put("defaultModel", "sonnet"));
+        View claudeRow = find(page, "Claude 登录，Claude Code");
+        View oldValue = find(page, "默认（sonnet）");
+        View custom = find(page, "输入自定义模型");
+        assertNotNull(oldValue);
+        tap(page, "ChatGPT 登录");
+        assertSame(claudeRow, find(page, "Claude 登录，Claude Code"));
+        assertSame(oldValue, find(page, "默认（sonnet）"));
+        assertFalse(custom.isEnabled());
+        CatalogRequests.complete(state, accounts);
+        Gateway.allowSave.countDown();
+        await(() -> CatalogRequests.success.containsKey(codex));
+
+        tap(page, "Google 登录");
+        CatalogRequests.complete(state, accounts);
+        await(() -> CatalogRequests.success.containsKey(GEMINI));
+        CatalogRequests.complete(codex, catalog("gpt", "GPT").put("defaultModel", "gpt"));
+        assertSame(oldValue, find(page, "默认（sonnet）"));
+        assertFalse(custom.isEnabled());
+        CatalogRequests.failRead(GEMINI, "offline");
+        View retry = find(page, "模型列表未能更新 · 重试");
+        assertNotNull(retry);
+        assertSame(custom.getParent(), retry.getParent());
+        assertTrue(custom.isEnabled());
+        tap(page, "模型列表未能更新 · 重试");
+        CatalogRequests.complete(GEMINI, catalog("gemini", "Gemini").put("defaultModel", "gemini"));
+        assertNotNull(find(page, "默认（gemini）"));
+        assertNull(find(page, "模型列表未能更新 · 重试"));
+
+        tap(page, "Claude 登录");
+        CatalogRequests.complete(state, accounts);
+        await(() -> CatalogRequests.success.containsKey(CLAUDE));
+        assertSame(oldValue, find(page, "默认（sonnet）"));
+        assertTrue(custom.isEnabled());
+        CatalogRequests.failRead(CLAUDE, "offline");
+        assertSame(oldValue, find(page, "默认（sonnet）"));
+        page.dismiss();
     }
 
     @Test public void mainSettingsEntryClosesDirectly() throws Exception {
