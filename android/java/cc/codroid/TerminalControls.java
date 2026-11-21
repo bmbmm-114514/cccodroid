@@ -1,211 +1,103 @@
 package cc.codroid;
 
 import android.content.Context;
-import android.graphics.Typeface;
-import android.text.InputType;
-import android.text.Editable;
-import android.text.TextWatcher;
-import android.util.TypedValue;
-import android.view.Gravity;
-import android.view.KeyEvent;
-import android.view.ViewGroup;
-import android.view.inputmethod.EditorInfo;
-import android.widget.EditText;
-import android.widget.HorizontalScrollView;
 import android.content.res.ColorStateList;
-import android.widget.ImageButton;
+import android.graphics.Typeface;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.HorizontalScrollView;
+import android.widget.LinearLayout;
+import android.widget.TableLayout;
+import android.widget.TableRow;
+import androidx.core.view.ViewCompat;
 import com.google.android.material.button.MaterialButton;
 import static cc.codroid.PixelUi.dp;
-import android.widget.LinearLayout;
-
-import java.util.function.Consumer;
 
 final class TerminalControls {
     private TerminalControls() {}
 
-    private static final class KeySpec {
-        final String label;
-        final String payload;
-        final String desc;
-
-        KeySpec(String label, String payload, String desc) {
-            this.label = label;
-            this.payload = payload;
-            this.desc = desc;
-        }
-    }
-
-    private static final KeySpec[][] KEY_GROUPS = {
-        {
-            new KeySpec("Ctrl+C", "\u0003", "中断 (Ctrl+C)"),
-            new KeySpec("Ctrl+D", "\u0004", "结束输入/退出 (Ctrl+D)"),
-            new KeySpec("Ctrl+Z", "\u001A", "挂起 (Ctrl+Z)")
-        },
-        {
-            new KeySpec("Tab", "\t", "制表符补全 (Tab)"),
-            new KeySpec("Esc", "\u001B", "取消/退出 (Esc)")
-        },
-        {
-            new KeySpec("↑", "\u001B[A", "方向键上"),
-            new KeySpec("↓", "\u001B[B", "方向键下"),
-            new KeySpec("←", "\u001B[D", "方向键左"),
-            new KeySpec("→", "\u001B[C", "方向键右")
-        }
-    };
-
-    interface Writer {
-        void write(String data, Consumer<Boolean> acknowledged);
-    }
-
-    static void add(LinearLayout parent, Writer writer) {
+    static View add(LinearLayout parent, TerminalKeyInput input) {
         Context c = parent.getContext();
-
-        LinearLayout root = new LinearLayout(c);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setLayoutParams(new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-
         HorizontalScrollView scroll = new HorizontalScrollView(c);
-        scroll.setFillViewport(false);
+        scroll.setFillViewport(true);
+        scroll.setFocusable(false);
         scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setHorizontalFadingEdgeEnabled(true);
-        scroll.setFadingEdgeLength(dp(c, 16));
-        scroll.setClipToPadding(false);
-        scroll.setPadding(dp(c, 12), 0, dp(c, 12), 0);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        scroll.setBackgroundColor(PixelUi.color(c, "surfaceContainer"));
+        scroll.setPadding(dp(c, 4), dp(c, 2), dp(c, 4), dp(c, 2));
 
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        scrollLp.topMargin = dp(c, 4);
-        scrollLp.bottomMargin = dp(c, 4);
-        scroll.setLayoutParams(scrollLp);
+        // Both rows share column widths, including at large font scales and when scrolled.
+        TableLayout keys = new TableLayout(c);
+        keys.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+        keys.setStretchAllColumns(true);
+        TableRow first = new TableRow(c);
+        TableRow second = new TableRow(c);
+        keys.addView(first);
+        keys.addView(second);
+        key(first, "Esc", "转义（Esc）", () -> input.key(TerminalKeyInput.Key.ESC));
+        key(first, "/", "斜杠", () -> input.text("/"));
+        key(first, "–", "连字符", () -> input.text("-"));
+        key(first, "Home", "行首（Home）", () -> input.key(TerminalKeyInput.Key.HOME));
+        key(first, "↑", "方向键上", () -> input.key(TerminalKeyInput.Key.UP));
+        key(first, "End", "行尾（End）", () -> input.key(TerminalKeyInput.Key.END));
+        key(first, "PgUp", "向上翻页（PgUp）", () -> input.key(TerminalKeyInput.Key.PAGE_UP));
 
-        LinearLayout keyBar = new LinearLayout(c);
-        keyBar.setOrientation(LinearLayout.HORIZONTAL);
-        keyBar.setGravity(Gravity.CENTER_VERTICAL);
-        keyBar.setLayoutParams(new ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
+        key(second, "Tab", "制表符（Tab）", () -> input.key(TerminalKeyInput.Key.TAB));
+        MaterialButton ctrl = key(second, "Ctrl", "Control 组合键", input::toggleCtrl);
+        MaterialButton alt = key(second, "Alt", "Alt 组合键", input::toggleAlt);
+        key(second, "←", "方向键左", () -> input.key(TerminalKeyInput.Key.LEFT));
+        key(second, "↓", "方向键下", () -> input.key(TerminalKeyInput.Key.DOWN));
+        key(second, "→", "方向键右", () -> input.key(TerminalKeyInput.Key.RIGHT));
+        key(second, "PgDn", "向下翻页（PgDn）", () -> input.key(TerminalKeyInput.Key.PAGE_DOWN));
 
-        for (int g = 0; g < KEY_GROUPS.length; g++) {
-            KeySpec[] group = KEY_GROUPS[g];
-            boolean isLastGroup = (g == KEY_GROUPS.length - 1);
-            for (int i = 0; i < group.length; i++) {
-                KeySpec spec = group[i];
-                boolean isLastInGroup = (i == group.length - 1);
-
-                MaterialButton key = PixelUi.button(c, spec.label, () -> writer.write(spec.payload, null));
-                key.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-                key.setMaxLines(1);
-                // A horizontally scrolling TextView would center the label in its virtual layout.
-                key.setHorizontallyScrolling(false);
-                key.setTextSize(13);
-                key.setMinWidth(dp(c, 48));
-                key.setMinHeight(dp(c, 48));
-                key.setMinimumWidth(dp(c, 48));
-                key.setMinimumHeight(dp(c, 48));
-                key.setInsetTop(dp(c, 4));
-                key.setInsetBottom(dp(c, 4));
-                key.setCornerRadius(dp(c, 14));
-                key.setPadding(dp(c, 12), 0, dp(c, 12), 0);
-                key.setBackgroundTintList(ColorStateList.valueOf(PixelUi.color(c, "surfaceContainerHigh")));
-                key.setTextColor(PixelUi.color(c, "onSurface"));
-                key.setContentDescription(spec.desc);
-                key.setTooltipText(spec.desc);
-                LinearLayout.LayoutParams keyLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                int marginEnd = isLastInGroup ? (isLastGroup ? 0 : dp(c, 16)) : dp(c, 6);
-                keyLp.setMarginEnd(marginEnd);
-                keyBar.addView(key, keyLp);
-            }
+        for (MaterialButton modifier : new MaterialButton[]{ctrl, alt}) {
+            modifier.setCheckable(true);
+            modifier.setToggleCheckedStateOnClick(false);
         }
-        scroll.addView(keyBar);
-        root.addView(scroll);
-
-        LinearLayout composer = new LinearLayout(c);
-        composer.setOrientation(LinearLayout.HORIZONTAL);
-        composer.setGravity(Gravity.CENTER_VERTICAL);
-        composer.setBackground(PixelUi.shape(c, "surfaceContainer", 28));
-        composer.setPadding(dp(c, 14), dp(c, 4), dp(c, 6), dp(c, 4));
-        composer.setMinimumHeight(dp(c, 56));
-
-        LinearLayout.LayoutParams composerLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        composerLp.setMargins(dp(c, 12), 0, dp(c, 12), dp(c, 8));
-        composer.setLayoutParams(composerLp);
-
-        EditText edit = new EditText(c);
-        edit.setTypeface(Typeface.MONOSPACE);
-        edit.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        edit.setTextColor(PixelUi.color(c, "onSurface"));
-        edit.setHintTextColor(PixelUi.color(c, "onSurfaceVariant"));
-        edit.setHint("输入终端命令");
-        edit.setMinimumHeight(dp(c, 48));
-        edit.setBackground(null);
-        edit.setSingleLine(true);
-        edit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        edit.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN);
-        edit.setPadding(dp(c, 4), dp(c, 8), dp(c, 4), dp(c, 8));
-
-        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(
-            0,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            1.0f
-        );
-        edit.setLayoutParams(editLp);
-
-        // Keep the draft until the PTY accepts it. A late reply must not erase newer typing.
-        long[] revision = {0}, submitted = {-1};
-        edit.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { revision[0]++; }
-            @Override public void afterTextChanged(Editable s) { }
+        input.onModifiersChanged(() -> {
+            showModifier(ctrl, input.isCtrl());
+            showModifier(alt, input.isAlt());
         });
-        Consumer<Boolean> submit = enter -> {
-            long version = revision[0];
-            if (submitted[0] == version) return;
-            String draft = edit.getText().toString();
-            if (!enter && draft.isEmpty()) return;
-            submitted[0] = version;
-            if (edit.hasFocus() && !draft.isEmpty()) edit.selectAll();
-            writer.write(enter ? draft + "\r" : draft, accepted -> {
-                if (version != revision[0]) return;
-                submitted[0] = -1;
-                if (accepted) edit.getText().clear();
-            });
-        };
-        Runnable executeAction = () -> submit.accept(true);
-        Runnable insertAction = () -> submit.accept(false);
+        scroll.addView(keys);
+        parent.addView(scroll, new LinearLayout.LayoutParams(-1, -2));
+        return scroll;
+    }
 
-        edit.setOnEditorActionListener((v, actionId, event) -> {
-            if (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) executeAction.run();
-                return true;
-            }
-            if (actionId != EditorInfo.IME_ACTION_SEND) return false;
-            executeAction.run();
-            return true;
-        });
+    private static MaterialButton key(TableRow row, String label, String description, Runnable action) {
+        Context c = row.getContext();
+        MaterialButton button = PixelUi.button(c, label, action);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setTextSize(13);
+        button.setLetterSpacing(0f);
+        button.setGravity(Gravity.CENTER);
+        button.setMaxLines(1);
+        button.setHorizontallyScrolling(false);
+        button.setFocusableInTouchMode(false);
+        button.setMinWidth(dp(c, 48));
+        button.setMinimumWidth(dp(c, 48));
+        button.setMinHeight(dp(c, 48));
+        button.setMinimumHeight(dp(c, 48));
+        button.setInsetTop(dp(c, 3));
+        button.setInsetBottom(dp(c, 3));
+        button.setCornerRadius(dp(c, 12));
+        button.setPadding(dp(c, 4), 0, dp(c, 4), 0);
+        button.setBackgroundTintList(ColorStateList.valueOf(PixelUi.color(c, "surfaceContainerHigh")));
+        button.setTextColor(PixelUi.color(c, "onSurface"));
+        button.setContentDescription(description);
+        button.setTooltipText(description);
+        TableRow.LayoutParams lp = new TableRow.LayoutParams(-2, -2);
+        if (row.getChildCount() > 0) lp.setMarginStart(dp(c, 2));
+        row.addView(button, lp);
+        return button;
+    }
 
-        ImageButton insertBtn = PixelUi.icon(c, "terminal_insert", "仅输入", insertAction);
-        insertBtn.setTooltipText("仅输入，不换行");
-        ImageButton executeBtn = PixelUi.icon(c, "terminal_enter", "发送", executeAction);
-        executeBtn.setTooltipText("发送并换行");
-        executeBtn.setBackground(PixelUi.clickable(c, "primary", 24));
-        executeBtn.setImageTintList(ColorStateList.valueOf(PixelUi.color(c, "onPrimary")));
-        composer.addView(edit);
-        composer.addView(insertBtn);
-        composer.addView(executeBtn);
-        root.addView(composer);
-
-        parent.addView(root);
+    private static void showModifier(MaterialButton button, boolean active) {
+        Context c = button.getContext();
+        button.setChecked(active);
+        button.setBackgroundTintList(ColorStateList.valueOf(PixelUi.color(c, active ? "primary" : "surfaceContainerHigh")));
+        button.setTextColor(PixelUi.color(c, active ? "onPrimary" : "onSurface"));
+        button.setStrokeColor(ColorStateList.valueOf(PixelUi.color(c, "onPrimary")));
+        button.setStrokeWidth(active ? dp(c, 2) : 0);
+        ViewCompat.setStateDescription(button, active ? "已启用一次，再点取消" : "未启用");
     }
 }

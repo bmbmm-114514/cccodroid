@@ -57,7 +57,8 @@ public class NativeTerminalResizeRequestTest {
         try {
             ReflectionHelpers.setField(files, "activeTermId", "test");
             ReflectionHelpers.setField(files, "lastGeneration", home.generation);
-            ReflectionHelpers.callInstanceMethod(files, "renderTermView",
+            ReflectionHelpers.setField(files, "activeMode", ReflectionHelpers.<Integer>getStaticField(NativeFiles.class, "MODE_TERM"));
+            ReflectionHelpers.callInstanceMethod(files, "render",
                     ReflectionHelpers.ClassParameter.from(NativeHome.class, home));
             ScrollView output = ReflectionHelpers.getField(files, "termScrollView");
             layout(output, 600);

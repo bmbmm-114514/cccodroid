@@ -9,14 +9,12 @@ import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.Consumer;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -32,21 +30,16 @@ public class TerminalInputViewTest {
     private final LinearLayout root = new LinearLayout(a);
     private final ScrollView viewport = new ScrollView(a);
     private final List<String> writes = new ArrayList<>();
-    private final List<Consumer<Boolean>> replies = new ArrayList<>();
-    private final TerminalInputView output = TerminalInputView.attach(viewport, writes::add);
-    private final EditText draft;
-    private final View send;
+    private final TerminalKeyInput input = new TerminalKeyInput(writes::add);
+    private final TerminalInputView output = TerminalInputView.attach(viewport, input);
 
     public TerminalInputViewTest() {
         a.setTheme(NativeAppearance.theme(a));
         root.setOrientation(LinearLayout.VERTICAL);
         root.addView(viewport, new LinearLayout.LayoutParams(-1, 0, 1));
-        TerminalControls.add(root, (data, reply) -> { writes.add(data); replies.add(reply); });
+        TerminalControls.add(root, input);
+        root.setFocusableInTouchMode(true);
         a.setContentView(root);
-        LinearLayout controls = (LinearLayout) root.getChildAt(1);
-        LinearLayout composer = (LinearLayout) controls.getChildAt(1);
-        draft = (EditText) composer.getChildAt(0);
-        send = composer.getChildAt(2);
         layout();
     }
 
@@ -58,7 +51,7 @@ public class TerminalInputViewTest {
     }
 
     @Test public void firstTapInBlankViewportShowsKeyboardAndDoesNotEchoLocally() {
-        draft.requestFocus();
+        root.requestFocus();
         output.display("$ ");
         layout();
         assertEquals(viewport.getHeight(), output.getHeight());
@@ -108,29 +101,23 @@ public class TerminalInputViewTest {
         assertEquals("zhong", replacement.getTextBeforeCursor(100, 0).toString());
         replacement.commitText("中", 1);
         replacement.setComposingText("pending", 1);
-        assertTrue(draft.requestFocus());
+        assertTrue(root.requestFocus());
         assertFalse(replacement.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)));
         assertFalse(replacement.finishComposingText());
         assertEquals(Arrays.asList("中"), writes);
     }
 
-    @Test public void bottomEditorRetainsFocusAndNewerCommandAcrossEchoAndLateReplies() {
-        assertTrue(draft.requestFocus());
-        draft.setText("one");
-        send.performClick();
-        draft.setText("two");
-        output.display("one\r\n");
+    @Test public void repeatedCommandsAndInterleavedEchoKeepTheTerminalConnectionFocused() {
+        assertTrue(output.requestFocus());
+        InputConnection ime = output.onCreateInputConnection(new EditorInfo());
+        assertTrue(ime.commitText("one", 1));
+        assertTrue(ime.performEditorAction(EditorInfo.IME_ACTION_DONE));
+        assertTrue(ime.commitText("two", 1));
+        output.display("one\r\n$ ");
         layout();
-        assertTrue(draft.hasFocus());
-        draft.onEditorAction(EditorInfo.IME_ACTION_SEND);
-        assertEquals(Arrays.asList("one\r", "two\r"), writes);
-        replies.get(0).accept(true);
-        assertEquals("two", draft.getText().toString());
-        replies.get(1).accept(false);
-        assertEquals("two", draft.getText().toString());
-        send.performClick();
-        replies.get(2).accept(true);
-        assertEquals("", draft.getText().toString());
-        assertTrue(draft.hasFocus());
+        assertTrue(output.hasFocus());
+        assertTrue(ime.performEditorAction(EditorInfo.IME_ACTION_DONE));
+        assertEquals(Arrays.asList("one", "\r", "two", "\r"), writes);
+        assertEquals("one\r\n$ ", output.getText().toString());
     }
 }

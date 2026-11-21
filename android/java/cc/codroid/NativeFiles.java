@@ -204,7 +204,12 @@ final class NativeFiles {
         makeTabButton(h, navBar, isModified ? "编辑器 *" : "编辑器", activeMode == MODE_EDITOR, () -> h.nav("editor"));
         makeTabButton(h, navBar, "Git", activeMode == MODE_GIT, () -> h.nav("git"));
         makeTabButton(h, navBar, "终端", activeMode == MODE_TERM, () -> h.nav("terminal"));
-        h.body.addView(navBar);
+        LinearLayout panel = h.body;
+        if (activeMode == MODE_TERM && !termLoading && activeTermId != null && pageError.isEmpty()) {
+            panel = new NativeTerminalLayout(h.a);
+            h.body.addView(panel, new LinearLayout.LayoutParams(-1, -1));
+        }
+        panel.addView(navBar);
 
         if (!pageError.isEmpty()) {
             h.text(h.body, pageError);
@@ -224,7 +229,7 @@ final class NativeFiles {
                 renderGitView(h);
                 break;
             case MODE_TERM:
-                renderTermView(h);
+                renderTermView(h, panel, navBar);
                 break;
         }
     }
@@ -1123,7 +1128,7 @@ final class NativeFiles {
     // 4. 原生终端面板 (PTY 会话 / SSE 回放与流 / 虚拟控制键 / 输入)
     // =========================================================================
 
-    private void renderTermView(NativeHome h) {
+    private void renderTermView(NativeHome h, LinearLayout panel, View navBar) {
         LinearLayout topBar = new LinearLayout(h.a);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -1186,8 +1191,8 @@ final class NativeFiles {
         });
         topBar.addView(more);
 
-        h.body.addView(topBar);
-        addDivider(h, h.body);
+        panel.addView(topBar);
+        View divider = addDivider(h, panel);
 
         if (termLoading) {
             renderLoading(h, "正在同步终端会话...");
@@ -1211,7 +1216,8 @@ final class NativeFiles {
         termScrollView.setBackground(PixelUi.shape(h.a, "surfaceContainerLow", 16));
         termScrollView.setClipToOutline(true);
 
-        termTextView = TerminalInputView.attach(termScrollView, data -> sendTermKey(h, sessionId, data, null));
+        TerminalKeyInput input = new TerminalKeyInput(data -> sendTermKey(h, sessionId, data));
+        termTextView = TerminalInputView.attach(termScrollView, input);
         termTextView.setTypeface(Typeface.MONOSPACE);
         termTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         termTextView.setTextColor(PixelUi.color(h.a, "onSurface"));
@@ -1227,9 +1233,10 @@ final class NativeFiles {
             termCols = cols; termRows = rows;
             scheduleTermResize(h);
         });
-        h.body.addView(termScrollView);
+        panel.addView(termScrollView);
 
-        TerminalControls.add(h.body, (data, ack) -> sendTermKey(h, sessionId, data, ack));
+        View keys = TerminalControls.add(panel, input);
+        ((NativeTerminalLayout) panel).bind(navBar, topBar, divider, termScrollView, termTextView, keys);
     }
 
     private void createTerm(NativeHome h) {
@@ -1404,10 +1411,9 @@ final class NativeFiles {
         if (pendingResize != null) handler.postDelayed(pendingResize, 80);
     }
 
-    private boolean sendTermKey(NativeHome h, String tid, String data, Consumer<Boolean> ack) {
+    private boolean sendTermKey(NativeHome h, String tid, String data) {
         if (lastGeneration != h.generation || activeMode != MODE_TERM || !tid.equals(activeTermId) || termExited) {
             if (termExited) h.notice("终端已退出");
-            if (ack != null) ack.accept(false);
             return false;
         }
         termWrites.execute(() -> {
@@ -1422,10 +1428,8 @@ final class NativeFiles {
                 try (OutputStream os = connection.getOutputStream()) { os.write(bytes); }
                 int status = connection.getResponseCode();
                 if (status != 200) throw new IOException(status == 409 ? "终端已退出" : "终端写入失败 (HTTP " + status + ")");
-                if (ack != null) h.a.runOnUiThread(() -> ack.accept(true));
             } catch (Exception e) {
                 h.a.runOnUiThread(() -> {
-                    if (ack != null) ack.accept(false);
                     if (lastGeneration == h.generation && tid.equals(activeTermId)) h.notice(e.getMessage());
                 });
             } finally { if (connection != null) connection.disconnect(); }
@@ -1506,12 +1510,13 @@ final class NativeFiles {
         return b;
     }
 
-    private static void addDivider(NativeHome h, LinearLayout parent) {
+    private static View addDivider(NativeHome h, LinearLayout parent) {
         View line = new View(h.a);
         line.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, h.dp(1))));
         line.setBackgroundColor(PixelUi.color(h.a, "outlineVariant"));
         parent.addView(line);
+        return line;
     }
 
     private static Button makeTabButton(NativeHome h, LinearLayout parent, String title, boolean active, Runnable act) {

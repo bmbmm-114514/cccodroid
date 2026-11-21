@@ -18,18 +18,17 @@ import android.text.SpannableStringBuilder;
 import android.graphics.Rect;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
-import java.util.function.Predicate;
 
 /** The PTY owns the screen text. IME pre-edit text lives in a separate editable. */
 final class TerminalInputView extends TextView {
-    private final Predicate<String> send;
+    private final TerminalKeyInput keys;
     private final GestureDetector taps;
     private final SpannableStringBuilder preedit = new SpannableStringBuilder();
     private DirectConnection currentConnection;
 
-    TerminalInputView(Context context, Predicate<String> send) {
+    private TerminalInputView(Context context, TerminalKeyInput keys) {
         super(context);
-        this.send = send;
+        this.keys = keys;
         setTextIsSelectable(true);
         setFocusableInTouchMode(true);
         Selection.setSelection(preedit, 0);
@@ -73,8 +72,8 @@ final class TerminalInputView extends TextView {
         }
     }
 
-    static TerminalInputView attach(ScrollView viewport, Predicate<String> send) {
-        TerminalInputView output = new TerminalInputView(viewport.getContext(), send);
+    static TerminalInputView attach(ScrollView viewport, TerminalKeyInput keys) {
+        TerminalInputView output = new TerminalInputView(viewport.getContext(), keys);
         viewport.setFillViewport(true);
         viewport.addView(output, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         return output;
@@ -113,7 +112,8 @@ final class TerminalInputView extends TextView {
 
         @Override public boolean commitText(CharSequence text, int cursor) {
             if (this != currentConnection || text == null) return false;
-            if (text.length() > 0 && !send.test("\n".contentEquals(text) ? "\r" : text.toString())) return false;
+            boolean accepted = "\n".contentEquals(text) ? keys.key(TerminalKeyInput.Key.ENTER) : keys.text(text.toString());
+            if (!accepted) return false;
             Editable pending = getEditable();
             removeComposingSpans(pending);
             pending.clear();
@@ -163,7 +163,7 @@ final class TerminalInputView extends TextView {
         }
 
         @Override public boolean performEditorAction(int action) {
-            return finishComposingText() && send.test("\r");
+            return finishComposingText() && keys.key(TerminalKeyInput.Key.ENTER);
         }
 
         @Override public boolean performContextMenuAction(int id) {
@@ -179,10 +179,7 @@ final class TerminalInputView extends TextView {
     private boolean deleteScreenText(int before, int after) {
         // IMEs can request unbounded deletion. The PTY has no editable document to measure.
         if (before > 4096 || after > 4096) return false;
-        StringBuilder keys = new StringBuilder();
-        for (int i = 0; i < before; i++) keys.append('\u007f');
-        for (int i = 0; i < after; i++) keys.append("\u001b[3~");
-        return keys.length() == 0 || send.test(keys.toString());
+        return keys.delete(before, after);
     }
 
     @Override public boolean onTextContextMenuItem(int id) {
@@ -191,38 +188,16 @@ final class TerminalInputView extends TextView {
         ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
         if (clip == null || clip.getItemCount() == 0) return false;
         CharSequence text = clip.getItemAt(0).coerceToText(getContext());
-        return text != null && send.test(text.toString());
+        return text != null && keys.paste(text.toString());
     }
 
     @Override public boolean onKeyDown(int code, KeyEvent event) {
         if (event.isCtrlPressed() && event.isShiftPressed() && code == KeyEvent.KEYCODE_V)
             return onTextContextMenuItem(android.R.id.paste);
-        String key = keyData(code, event);
-        if (key == null) return super.onKeyDown(code, event);
-        send.test(key);
-        return true;
+        return keys.hardware(event) || super.onKeyDown(code, event);
     }
 
     @Override public boolean onKeyUp(int code, KeyEvent event) {
-        return keyData(code, event) != null || super.onKeyUp(code, event);
-    }
-
-    private String keyData(int code, KeyEvent event) {
-        switch (code) {
-            case KeyEvent.KEYCODE_ENTER: case KeyEvent.KEYCODE_NUMPAD_ENTER: return "\r";
-            case KeyEvent.KEYCODE_DEL: return "\u007f";
-            case KeyEvent.KEYCODE_FORWARD_DEL: return "\u001b[3~";
-            case KeyEvent.KEYCODE_DPAD_UP: return "\u001b[A";
-            case KeyEvent.KEYCODE_DPAD_DOWN: return "\u001b[B";
-            case KeyEvent.KEYCODE_DPAD_RIGHT: return "\u001b[C";
-            case KeyEvent.KEYCODE_DPAD_LEFT: return "\u001b[D";
-            case KeyEvent.KEYCODE_TAB: return event.isShiftPressed() ? "\u001b[Z" : "\t";
-            case KeyEvent.KEYCODE_ESCAPE: return "\u001b";
-            default:
-                if (event.isCtrlPressed() && code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z)
-                    return String.valueOf((char) (code - KeyEvent.KEYCODE_A + 1));
-                int cp = event.getUnicodeChar();
-                return cp > 0 && Character.isValidCodePoint(cp) ? new String(Character.toChars(cp)) : null;
-        }
+        return keys.hardware(event) || super.onKeyUp(code, event);
     }
 }

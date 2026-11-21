@@ -69,14 +69,20 @@ public class NativeHome {
         shell = new LinearLayout(a);
         shell.setOrientation(LinearLayout.HORIZONTAL);
         root.addView(shell, new LinearLayout.LayoutParams(-1,0,1));
-        main = new LinearLayout(a);
+        MaterialToolbar top = new MaterialToolbar(a);
+        body = new LinearLayout(a);
+        main = new LinearLayout(a) {
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                NativeTerminalLayout.fitHeader(top, body, widthSpec, heightSpec);
+                super.onMeasure(widthSpec, heightSpec);
+            }
+        };
         main.setOrientation(LinearLayout.VERTICAL);
         FrameLayout viewport = new FrameLayout(a);
         shell.addView(viewport, new LinearLayout.LayoutParams(0, -1, 1));
         viewport.addView(main, new FrameLayout.LayoutParams(-1, -1));
         motion = new PixelPageMotion(viewport, main);
 
-        MaterialToolbar top = new MaterialToolbar(a);
         top.setContentInsetsRelative(0,0);
         top.setBackgroundColor(PixelUi.color(a,"surface"));
         top.setMinimumHeight(dp(64));
@@ -106,7 +112,6 @@ public class NativeHome {
         tools.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         toolbar.addView(tools,new LinearLayout.LayoutParams(-2,-2));
 
-        body = new LinearLayout(a);
         body.setOrientation(LinearLayout.VERTICAL);
         main.addView(body,new LinearLayout.LayoutParams(-1,0,1));
         configureNavigation(a.getResources().getConfiguration().screenWidthDp >= 600);
