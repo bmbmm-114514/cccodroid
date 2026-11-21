@@ -1,12 +1,12 @@
-# 在 GitHub 上构建 APK：每个 PR、每次推到 main 都出一个包（在这次运行的 Artifacts 里下载）。
-# 推到 main 时用正式钥匙签，能直接覆盖安装正式版。钥匙 CCCODROID_RELEASE_KEY（钥匙 JSON 的 base64）只放在
-# environment「apk-release」里，那个环境只放行 main 分支：任何 PR（包括本仓库分支开的、改了这份工作流的）都拿不到它，
+# 在 GitHub 上构建 APK：每个 PR、每次推到 multi-agent 都出一个包（在这次运行的 Artifacts 里下载）。
+# 推到 multi-agent 时用正式钥匙签，能直接覆盖安装正式版。钥匙 MULTI_AGENT_RELEASE_KEY（钥匙 JSON 的 base64）只放在
+# environment「multi-agent-apk-release」里，那个环境只放行 multi-agent 分支：任何 PR（包括本仓库分支开的、改了这份工作流的）都拿不到它，
 # 只能用临时生成的测试钥匙签 —— 能装，但要先卸载正式版（数据会丢），建议装在测试机上。
 name: apk
 
 on:
   push:
-    branches: [main]
+    branches: [multi-agent]
     paths-ignore: ["docs/**", "**.md", "devkit/**", "devkit-*", ".github/workflows/devkit.yml"]
   pull_request:
     paths-ignore: ["docs/**", "**.md"]
@@ -45,10 +45,10 @@ jobs:
     needs: test
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    # 只有 main 上的运行进正式钥匙所在的环境；其余（PR、别的分支手动跑）进 apk-ci，拿不到钥匙。
+    # 只有 multi-agent 上的运行进正式钥匙所在的环境；其余（PR、别的分支手动跑）进 apk-ci，拿不到钥匙。
     # 这里必须落到一个真实存在的环境名：算成空字符串时 GitHub 会让这个被跳过的 job 一直「等环境」，
     # 测试失败后整个运行要挂几十分钟才收尾（PR #204：20:23 就失败了，21:00 运行才结束）。
-    environment: ${{ (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') && 'apk-release' || 'apk-ci' }}
+    environment: ${{ (github.ref == 'refs/heads/multi-agent' && github.event_name != 'pull_request') && 'multi-agent-apk-release' || 'apk-ci' }}
     env:
       BUILD_TOOLS: "35.0.0"
       PLATFORM: "android-35"
@@ -72,7 +72,7 @@ jobs:
 
       - name: 签名钥匙
         env:
-          RELEASE_KEY: ${{ secrets.CCCODROID_RELEASE_KEY }}
+          RELEASE_KEY: ${{ secrets.MULTI_AGENT_RELEASE_KEY }}
         run: |
           if [ -n "$RELEASE_KEY" ]; then
             printf '%s' "$RELEASE_KEY" | base64 -d > "$RUNNER_TEMP/key.json"
@@ -86,19 +86,19 @@ jobs:
           fi
 
       - name: 构建
+        env:
+          RELEASE_FINGERPRINT: ${{ vars.MULTI_AGENT_SIGNER_SHA256 }}
         run: |
           BT="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS"
           export CC_ANDROID="$ANDROID_SDK_ROOT/ndk/$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
           export JAVAC=javac D8="$BT/d8" AAPT2="$BT/aapt2" ANDROID_JAR="$ANDROID_SDK_ROOT/platforms/$PLATFORM/android.jar"
           export SIGN=apksigner APKSIGNER="$BT/apksigner" ZIPALIGN="$BT/zipalign"
-          # 双方案：先出 targetSdk 36 的（cccodroid-36.apk），再出默认的 28
-          TARGET_SDK=36 sh scripts/build.sh && mv dist/cccodroid.apk dist/cccodroid-36.apk
           sh scripts/build.sh
           rm -f "$RUNNER_TEMP/key.json"
-          # 证书指纹：正式包必须是 README 里写的那一张（B7:03…8F:E0），对不上就别出包——
+          # 证书指纹：正式包必须是 独立分支配置的证书，对不上就别出包——
           # 钥匙被意外换掉时不会静默发出别的证书签的「正式包」（审查 v0.5.7 L12）。测试包只打出来看
-          EXPECT=b70361595dd3d8d704dd210ed596fc577014ce2272884fb6980bf69623338fe0
-          for a in dist/cccodroid.apk dist/cccodroid-36.apk; do
+          EXPECT="$RELEASE_FINGERPRINT"
+          for a in dist/cccodroid-multi-agent.apk; do
             got=$("$BT/apksigner" verify --print-certs "$a" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
             echo "$a  $got"
             if [ "$SIGNED" = release ] && [ "$got" != "$EXPECT" ]; then echo "::error::$a 的签名证书不是正式钥匙（$got）"; exit 1; fi
@@ -109,6 +109,5 @@ jobs:
         with:
           name: cccodroid-${{ env.SIGNED }}-${{ env.SHORT_SHA }}
           path: |
-            dist/cccodroid.apk
-            dist/cccodroid-36.apk
+            dist/cccodroid-multi-agent.apk
           retention-days: 30
