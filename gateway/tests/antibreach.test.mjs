@@ -340,3 +340,17 @@ test("给应用作证（Priv 问特权口令）：只认本网关起的、还在
     for (const k of descendants(sup.pid)) try { process.kill(k, "SIGKILL"); } catch {}
   }
 });
+
+test("两个原生编辑器同时保存 hook 时保留先提交的内容和其他设置", async () => {
+  const file = path.join(CFG.workspace, ".claude", "settings.local.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const hooks = { Stop: [{ hooks: [{ type: "command", command: "true" }] }] };
+  fs.writeFileSync(file, JSON.stringify({ model: "untouched", hooks }));
+  const update = { Stop: [{ hooks: [{ type: "prompt", prompt: "fixture" }], matcher: "a" }] };
+  const form = { scope: "local", expectedHooks: hooks, expectedDisabled: false };
+  const results = await Promise.allSettled([saveHooks({ ...form, hooks: update }), saveHooks({ ...form, disableAll: true })]);
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].reason.code, "stale");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)), { model: "untouched", hooks: update });
+  assert.deepEqual(listHooks().scopes.find(s => s.scope === "local").hooks, update);
+});

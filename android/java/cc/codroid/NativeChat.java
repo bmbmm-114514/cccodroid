@@ -2,7 +2,6 @@ package cc.codroid;
 
 import android.app.AlertDialog;
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -1288,6 +1287,14 @@ public class NativeChat {
         return "draft_" + (chatId == null || chatId.trim().isEmpty() ? "blank" : chatId.trim());
     }
 
+    static String readThemeDraft(Context ctx, String id) {
+        return ctx.getSharedPreferences("cc_native_chat_drafts", Context.MODE_PRIVATE).getString(getDraftKey(id), "");
+    }
+
+    static boolean writeThemeDraft(Context ctx, String id, String text) {
+        return ctx.getSharedPreferences("cc_native_chat_drafts", Context.MODE_PRIVATE).edit().putString(getDraftKey(id), text).commit();
+    }
+
     static void appendDraft(Context context, String id, String text) {
         SharedPreferences prefs = context.getSharedPreferences("cc_native_chat_drafts", Context.MODE_PRIVATE);
         String key = getDraftKey(id), previous = prefs.getString(key, "");
@@ -1502,10 +1509,7 @@ public class NativeChat {
                         sb.setSpan(new ClickableSpan() {
                             @Override
                             public void onClick(View widget) {
-                                try {
-                                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                                    h.a.startActivity(intent);
-                                } catch (Exception ignored) {}
+                                h.openUrl(url);
                             }
                         }, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                         sb.setSpan(new ForegroundColorSpan(accentColor), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);

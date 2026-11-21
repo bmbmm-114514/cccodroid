@@ -2,6 +2,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, ensureShell, killTree } from "./claude.mjs";
 import { SID_RE, skillDirOk, zipReadAsync } from "./sessionops.mjs";
@@ -200,13 +201,25 @@ export function parseStdioTarget(target) {
 
 /** 编辑表单预填：命令/地址 + 现有环境变量、请求头的名字。值可能是令牌，不发到前端（留空 = 保留原值）。
  *  停用名单里的也能编辑（改名单里的定义，启用时按新定义加回）。 */
+// The native editor can detect simultaneous edits without receiving saved secret values.
+const mcpRevisionKey = crypto.randomBytes(32);
+function mcpRevision(def, disabled) {
+  return crypto.createHmac("sha256", mcpRevisionKey).update(JSON.stringify([disabled, def])).digest("hex");
+}
+let mcpWrites = Promise.resolve();
+function mcpWrite(operation) {
+  const next = mcpWrites.then(operation);
+  mcpWrites = next.catch(() => {});
+  return next;
+}
+
 export async function getMcp(b) {
   const name = String(b.name || "").trim();
   const off = extOff();
   const def = (extIdOk(name) && off.mcp[name]) || userMcpDef(name);
   if (!def) return { ok: false, message: tz("找不到这条 MCP 配置（账户连接器不能编辑）") };
   const stdio = def.type !== "http" && def.type !== "sse";
-  return { ok: true, name, transport: stdio ? "stdio" : def.type,
+  return { ok: true, name, revision: mcpRevision(def, !!off.mcp[name]), transport: stdio ? "stdio" : def.type,
     target: stdio ? [def.command, ...(Array.isArray(def.args) ? def.args : [])].filter((x) => x != null).map(quoteStdioArg).join(" ") : String(def.url || ""),
     envNames: Object.keys(def.env || {}), headerNames: Object.keys(def.headers || {}) };
 }
@@ -214,12 +227,18 @@ export async function getMcp(b) {
 /** 编辑 = remove + add-json（claude 的 mcp add / add-json 对同名条目都直接报错，没有 update）。
  *  写回用 add-json：定义整体作为单个 JSON 参数，值里的逗号、等号、引号、换行都不会被切坏，
  *  也不走命令行选项解析（停用/启用已在用这个写法）。add 失败就把旧定义原样加回。 */
-export async function editMcp(b) {
+export function editMcp(b) {
+  return mcpWrite(() => applyMcpEdit(b));
+}
+async function applyMcpEdit(b) {
   const name = String(b.name || "").trim();
   const off = extOff();
   const disabled = !!(extIdOk(name) && off.mcp[name]);
   const def = disabled ? off.mcp[name] : userMcpDef(name);
   if (!def) return { ok: false, message: tz("找不到这条 MCP 配置（账户连接器不能编辑）") };
+  if (b.expectedRevision !== undefined && b.expectedRevision !== mcpRevision(def, disabled)) {
+    return { ok: false, code: "stale", message: tz("配置已修改，请重新打开后编辑") };
+  }
   const newName = String(b.newName || name).trim();
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(newName) || badArg(newName)) return { ok: false, message: tz("名字只能用字母、数字、点、下划线、横线") };
   // 两边名单都要查：停用条目改名成活跃条目（或反过来）会留下同名幽灵，列表只显示一条、另一条会「复活」
@@ -360,7 +379,7 @@ function cleanHooks(h) {
   }
   return out;
 }
-export function saveHooks({ scope, dir, hooks, disableAll }) {
+export function saveHooks({ scope, dir, hooks, disableAll, expectedHooks, expectedDisabled }) {
   if (!["user", "project", "local"].includes(scope)) throw new Error("bad scope");
   const file = hookSettingsFile(scope, dir);
   const clean = hooks === undefined ? undefined : cleanHooks(hooks);
@@ -371,6 +390,10 @@ export function saveHooks({ scope, dir, hooks, disableAll }) {
     let paused = readPaused(file);
     if (j.disableAllHooks === true) { paused = { ...(j.hooks || {}), ...(paused || {}) }; delete j.hooks; }   // 旧的暂停办法：转过来
     delete j.disableAllHooks;
+    if ((expectedHooks !== undefined && !isDeepStrictEqual(expectedHooks, paused || j.hooks || {})) ||
+        (expectedDisabled !== undefined && expectedDisabled !== !!paused)) {
+      throw Object.assign(new Error(tz("Hook 配置已修改，请重新载入后编辑")), { code: "stale" });
+    }
     const pause = disableAll !== undefined ? !!disableAll : !!paused;
     const want = clean !== undefined ? clean : (paused || j.hooks || {});
     const ucb = scope === "user" ? ucAppBegin() : null;
@@ -833,11 +856,11 @@ export async function routeExtensions(req, res, u, p) {
       if (req.method === "GET" && p === "/api/ext/mcp") return sendJson(res, 200, { items: await listMcp() });
       if (req.method === "GET" && p === "/api/ext/mcp/get") return sendJson(res, 200, await getMcp({ name: u.searchParams.get("name") }));
       if (req.method === "POST" && p === "/api/ext/mcp/edit") return sendJson(res, 200, await editMcp(body));
-      if (req.method === "POST" && p === "/api/ext/mcp/add") return sendJson(res, 200, await addMcp(body));
-      if (req.method === "POST" && p === "/api/ext/mcp/remove") return sendJson(res, 200, await removeMcp(body.name));
-      if (req.method === "POST" && p === "/api/ext/mcp/disable") return sendJson(res, 200, await disableMcp(String(body.name || "")));
-      if (req.method === "POST" && p === "/api/ext/mcp/enable") return sendJson(res, 200, await enableMcp(String(body.name || "")));
-      if (req.method === "POST" && p === "/api/ext/mcp/forget") return sendJson(res, 200, forgetMcp(String(body.name || "")));
+      if (req.method === "POST" && p === "/api/ext/mcp/add") return sendJson(res, 200, await mcpWrite(() => addMcp(body)));
+      if (req.method === "POST" && p === "/api/ext/mcp/remove") return sendJson(res, 200, await mcpWrite(() => removeMcp(body.name)));
+      if (req.method === "POST" && p === "/api/ext/mcp/disable") return sendJson(res, 200, await mcpWrite(() => disableMcp(String(body.name || ""))));
+      if (req.method === "POST" && p === "/api/ext/mcp/enable") return sendJson(res, 200, await mcpWrite(() => enableMcp(String(body.name || ""))));
+      if (req.method === "POST" && p === "/api/ext/mcp/forget") return sendJson(res, 200, await mcpWrite(() => forgetMcp(String(body.name || ""))));
       if (req.method === "POST" && p === "/api/ext/skills/mode") return sendJson(res, 200, await setSkillMode(String(body.dir || ""), String(body.mode || "")));
       if (req.method === "GET" && p === "/api/ext/off") { const o = extOff(); return sendJson(res, 200, { comp: o.comp, mod: o.mod }); }
       if (req.method === "POST" && p === "/api/ext/off") return sendJson(res, 200, await setOff(String(body.kind || ""), String(body.id || ""), !!body.on));

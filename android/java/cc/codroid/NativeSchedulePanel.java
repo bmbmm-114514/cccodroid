@@ -312,33 +312,54 @@ public class NativeSchedulePanel {
         JSONObject oldFreq = existing != null ? existing.optJSONObject("freq") : null;
         NativeFrequencyPanel frequency = new NativeFrequencyPanel(h, form, oldFreq);
 
-        new AlertDialog.Builder(h.a)
+        NativeTaskOptionsPanel options = new NativeTaskOptionsPanel(h, form, existing);
+        String initialFrequency = "";
+        try {
+            JSONObject frequencyValue = frequency.read();
+            if (frequencyValue != null) initialFrequency = frequencyValue.toString();
+        } catch (IllegalArgumentException ignored) {
+            // A legacy task may have a frequency that needs to be corrected in the form.
+        }
+        final String displayedFrequency = initialFrequency;
+        AlertDialog editor = new AlertDialog.Builder(h.a)
             .setTitle(existing == null ? "新建定时任务" : "编辑任务")
             .setView(sv)
-            .setPositiveButton("保存", (d, w) -> {
-                String name = nameEd.getText().toString().trim();
-                String prompt = promptEd.getText().toString().trim();
-                if (name.isEmpty() || prompt.isEmpty()) {
-                    h.notice("名称和指令内容均不能为空");
-                    return;
-                }
-                JSONObject b = new JSONObject();
-                try {
-                    b.put("name", name);
-                    b.put("prompt", prompt);
-                    JSONObject f = frequency.read();
-                    if (f != null) b.put("freq", f);
-                } catch (IllegalArgumentException invalid) { h.notice(invalid.getMessage()); return; }
-                  catch (org.json.JSONException invalid) { h.notice("任务参数格式错误"); return; }
-
-                if (existing == null) {
-                    h.post("/api/sched", b, res -> reload.run());
-                } else {
-                    h.req("PATCH", "/api/sched/" + existing.optString("id"), b, res -> reload.run());
-                }
-            })
+            .setPositiveButton("保存", null)
             .setNegativeButton("取消", null)
-            .show();
+            .create();
+        editor.show();
+        Button save = editor.getButton(AlertDialog.BUTTON_POSITIVE);
+        save.setOnClickListener(v -> {
+            String name = nameEd.getText().toString();
+            String prompt = promptEd.getText().toString();
+            if (name.trim().isEmpty() || prompt.trim().isEmpty()) {
+                h.notice("名称和指令内容均不能为空");
+                return;
+            }
+            JSONObject patch = new JSONObject();
+            try {
+                if (existing == null || !existing.optString("name").equals(name)) patch.put("name", name);
+                if (existing == null || !existing.optString("prompt").equals(prompt)) patch.put("prompt", prompt);
+                JSONObject value = frequency.read();
+                if (value != null && (existing == null || !value.toString().equals(displayedFrequency))) patch.put("freq", value);
+                options.apply(patch);
+                if (existing != null) {
+                    if (patch.length() == 0) { editor.dismiss(); return; }
+                    JSONObject expected = new JSONObject();
+                    for (java.util.Iterator<String> it = patch.keys(); it.hasNext();) {
+                        String field = it.next();
+                        if (existing.has(field)) expected.put(field, existing.get(field));
+                    }
+                    patch.put("expected", expected);
+                }
+            } catch (IllegalArgumentException invalid) { h.notice(invalid.getMessage()); return; }
+              catch (org.json.JSONException invalid) { h.notice("任务参数格式错误"); return; }
+            save.setEnabled(false);
+            String path = existing == null ? "/api/sched" : "/api/sched/" + existing.optString("id");
+            h.req(existing == null ? "POST" : "PATCH", path, patch,
+                res -> { editor.dismiss(); reload.run(); },
+                message -> { save.setEnabled(true); h.notice(message); });
+        });
     }
 
     private static void showBudgetDialog(NativeHome h, double currentBudget, Runnable reload) {

@@ -9,8 +9,6 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
 import org.json.JSONArray;
@@ -37,7 +35,7 @@ public final class NativeExtensionPanel {
         Spinner spinner = new Spinner(h.a);
         spinner.setAdapter(new ArrayAdapter<>(h.a,
             android.R.layout.simple_spinner_dropdown_item,
-            new String[]{"插件管理", "MCP 服务", "技能扩展", "可选组件", "扩展市场"}));
+            new String[]{"插件管理", "MCP 服务", "技能扩展", "可选组件", "扩展市场", "Hooks"}));
         topBar.addView(spinner);
 
         LinearLayout scroll = h.scrolling();
@@ -56,7 +54,8 @@ public final class NativeExtensionPanel {
                     LinearLayout page = new LinearLayout(h.a);
                     page.setOrientation(LinearLayout.VERTICAL);
                     scroll.addView(page);
-                    NativeMarketplacePanel.show(h, page);
+                    if (pos == 4) NativeMarketplacePanel.show(h, page);
+                    else NativeHooksPanel.show(h, page);
                 }
             }
             @Override public void onNothingSelected(AdapterView<?> p) {}
@@ -211,7 +210,7 @@ public final class NativeExtensionPanel {
         LinearLayout list = new LinearLayout(h.a);
         list.setOrientation(LinearLayout.VERTICAL);
 
-        h.button(bar, "+ 添加服务", () -> showAddMcp(h, list, gen));
+        h.button(bar, "添加 MCP 服务", () -> NativeMcpEditorPanel.show(h, null, () -> { if (list.isAttachedToWindow()) loadMcp(h, list, gen, ++reqTicket); }));
         h.button(bar, "刷新", () -> loadMcp(h, list, gen, ++reqTicket));
 
         root.addView(list);
@@ -243,6 +242,7 @@ public final class NativeExtensionPanel {
 
                 LinearLayout acts = row(h, c);
                 if (!dis && !m.optBoolean("user")) continue;
+                h.button(acts, "编辑配置与凭据", () -> NativeMcpEditorPanel.show(h, name, () -> { if (list.isAttachedToWindow()) loadMcp(h, list, gen, ++reqTicket); }));
                 if (dis) {
                     h.button(acts, "启用", () -> h.post("/api/ext/mcp/enable", NativeHome.json("name", name), r -> {
                         if (!r.optBoolean("ok")) { h.notice(r.optString("message", "操作失败")); return; }
@@ -257,7 +257,7 @@ public final class NativeExtensionPanel {
                     }));
                 }
                 h.button(acts, "删除", () -> confirm(h, "删除 MCP", "确定移除 MCP 服务 " + name + " 吗？", () ->
-                    h.post("/api/ext/mcp/remove", NativeHome.json("name", name), r -> {
+                    h.post(dis ? "/api/ext/mcp/forget" : "/api/ext/mcp/remove", NativeHome.json("name", name), r -> {
                         if (!r.optBoolean("ok")) { h.notice(r.optString("message", "操作失败")); return; }
                         h.notice("已删除");
                         if (list.isAttachedToWindow()) loadMcp(h, list, gen, ++reqTicket);
@@ -266,69 +266,6 @@ public final class NativeExtensionPanel {
         });
     }
 
-    private void showAddMcp(NativeHome h, LinearLayout list, int gen) {
-        LinearLayout v = new LinearLayout(h.a);
-        v.setOrientation(LinearLayout.VERTICAL);
-        v.setPadding(h.dp(16), h.dp(10), h.dp(16), h.dp(10));
-
-        EditText nameIn = new EditText(h.a);
-        nameIn.setHint("服务名称 (字母/数字/下划线/横线)");
-        v.addView(nameIn);
-
-        RadioGroup rg = new RadioGroup(h.a);
-        rg.setOrientation(LinearLayout.VERTICAL);
-        RadioButton rbStdio = new RadioButton(h.a);
-        rbStdio.setText("本地命令 (stdio)");
-        rbStdio.setChecked(true);
-        RadioButton rbHttp = new RadioButton(h.a);
-        rbHttp.setText("远程 (HTTP/SSE)");
-        rg.addView(rbStdio);
-        rg.addView(rbHttp);
-        v.addView(rg);
-
-        EditText targetIn = new EditText(h.a);
-        targetIn.setHint("命令及参数 (如 npx -y ...)");
-        v.addView(targetIn);
-
-        rbStdio.setOnCheckedChangeListener((b, chk) ->
-            targetIn.setHint(chk ? "命令及参数 (如 npx -y ...)" : "远程地址 (如 https://...)"));
-
-        new AlertDialog.Builder(h.a)
-            .setTitle("添加 MCP 服务")
-            .setView(v)
-            .setPositiveButton("添加", (d, w) -> {
-                String name = nameIn.getText().toString().trim();
-                String target = targetIn.getText().toString().trim();
-                boolean isStdio = rbStdio.isChecked();
-                if (name.isEmpty() || target.isEmpty()) {
-                    h.notice("名称和目标不能为空");
-                    return;
-                }
-                if (!name.matches("^[A-Za-z0-9._-]{1,64}$") || name.startsWith("-")) {
-                    h.notice("名称格式非法");
-                    return;
-                }
-                if (!isStdio && !target.toLowerCase().startsWith("http://") && !target.toLowerCase().startsWith("https://")) {
-                    h.notice("远程地址须以 http:// 或 https:// 开头");
-                    return;
-                }
-                confirm(h, "添加确认", "确定配置并启动 MCP 服务 [" + name + "] 吗？", () -> {
-                    JSONObject b = NativeHome.json("name", name, "transport", isStdio ? "stdio" : "http", "target", target);
-                    h.post("/api/ext/mcp/add", b, r -> {
-                        if (r.optBoolean("ok")) {
-                            h.notice("MCP 添加成功");
-                            if (list.isAttachedToWindow()) loadMcp(h, list, gen, ++reqTicket);
-                        } else {
-                            h.notice(r.optString("message", "添加失败"));
-                        }
-                    });
-                });
-            })
-            .setNegativeButton("取消", null)
-            .show();
-    }
-
-    // --- 技能 (Skills) ---
     private void renderSkills(NativeHome h, LinearLayout root, int gen, int ticket) {
         LinearLayout bar = row(h, root);
         bar.setPadding(h.dp(10), h.dp(4), h.dp(10), h.dp(4));

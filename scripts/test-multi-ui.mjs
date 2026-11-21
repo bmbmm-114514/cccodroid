@@ -6,6 +6,16 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { startManagedUiServer } from "../gateway/tests/fixtures/managed-ui-server.mjs";
 
+function appearanceBridgeFixture() {
+  const sid = "multi:project-chat", file = { path:"/fixture/notes.txt", size:10 };
+  localStorage.setItem("cc.drafts", JSON.stringify({[sid]:{text:"Classic draft", att:[file]}}));
+  const packet = JSON.stringify({id:"test-handoff",sid,project:"p",draft:"Native draft"});
+  window.CCApp = {
+    chooseFrontend() {}, chooseFrontendState(state) { window.appearanceSent = JSON.parse(state); },
+    restoreFrontend() { setTimeout(() => { window.appearanceDelivered = window.__ccAppearanceReceive(packet); }); }
+  };
+}
+
 async function checkWorkbench() {
   const by = id => document.getElementById(id);
   const assert = (ok, message) => { if (!ok) throw Error(message); };
@@ -89,8 +99,16 @@ async function checkWorkbench() {
   const sent = () => calls.filter(x => x.action === "send").at(-1)?.body;
   await until(() => !!window.__cc, "app startup");
   await until(() => window.__cc.srv.connected, "native gateway connection");
+  await until(() => window.appearanceDelivered && window.__cc.view.sessionId === "multi:project-chat", "native conversation transferred to classic");
+  await until(() => by("ma-turns").textContent.includes(first.assistant), "transferred conversation loaded");
+  assert(by("input").value.includes("Classic draft") && by("input").value.includes("Native draft"), "both existing drafts retained");
+  assert(window.__cc.state.attachments.some(a => a.path === "/fixture/notes.txt"), "classic attachment retained");
+  by("native-appearance").click();
+  assert(window.appearanceSent?.sid === "multi:project-chat" && window.appearanceSent.draft.includes("@/fixture/notes.txt"), "classic exports shared conversation and attachment reference");
   window.__cc.openSession("synthetic-ui-a");
   await until(() => window.__cc.view.histOk, "original Claude chat");
+  by("native-appearance").click();
+  assert(window.appearanceSent.sid === "synthetic-ui-a", "classic exports original Claude session");
   by("chat-agent-chip").click();
   await until(() => [...by("set-provider").options].some(o => o.value === "chatgpt"), "account provider options");
   const order = [...by("set-provider").options].map(o => o.value);
@@ -185,6 +203,23 @@ async function checkWorkbench() {
   assert(sent().agent === "agy" && sent().destinationProvider === "google" && sent().destinationModel === "fixture-destination" && sent().effort === "high" && sent().serviceTier === "", "selected Google model reaches the destination");
   assert(calls.some(x => x.action === "create" && !x.body.claudeSessionId && x.body.title === "New Google project"), "new chat created without importing another session");
   assert(!errors.length, errors.join("\n"));
+
+  const expectedSkins = ["native","qiusuo","zhuyue","goucheng","shise"];
+  const skinButtons = [...document.querySelectorAll("#seg-skin [data-sk]")];
+  assert(JSON.stringify(skinButtons.map(b=>b.dataset.sk)) === JSON.stringify(expectedSkins), "all five classic themes are accessible");
+  window.Theme.setType("fs", "xl");
+  for (const button of skinButtons) {
+    button.click();
+    for (const mode of ["auto","light","dark"]) {
+      document.querySelector('#seg-mode [data-md="'+mode+'"]').click();
+      for (const night of [false,true]) {
+        window.Theme.system(night);
+        assert(document.documentElement.dataset.skin===button.dataset.sk, "selected classic theme");
+        assert(window.Theme.current===(mode==="auto" ? (night ? "dark":"light") : mode), "classic theme brightness");
+        assert(document.documentElement.dataset.fs==="xl", "font size is preserved across classic themes");
+      }
+    }
+  }
 }
 
 const fixtureHtml = await fs.readFile(new URL("../gateway/web/index.html", import.meta.url), "utf8");
@@ -196,7 +231,7 @@ try {
     async handleRequest(req, res, url) {
       if (url.pathname === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(fixtureHtml.replace("</body>", '<script src="/multi-test.js"></script></body>'));
+        res.end(fixtureHtml.replace("<head>", "<head><script>(" + appearanceBridgeFixture + ")();</script>").replace("</body>", '<script src="/multi-test.js"></script></body>'));
         return true;
       }
       if (url.pathname === "/multi-test.js") {

@@ -215,5 +215,5 @@ export function conversationStore(dir, adapters, holdActivity = () => () => {}) 
     }
   }
   return { create, view, send, stop, approve, shutdown, edit, list: () => [...summaries.values()].sort((a,b) => b.updatedAt-a.updatedAt),
-    wait: id => jobs.get(id)?.done || Promise.resolve(), imported: sid => origins.get(sid) };
+    wait: id => jobs.get(id)?.done || Promise.resolve(), resolveId: sid => summaries.has(sid) ? sid : origins.get(sid) };
 }

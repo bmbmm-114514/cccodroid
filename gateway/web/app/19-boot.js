@@ -547,13 +547,70 @@
   if (window.CCLayout) CCLayout.init({ openDrawer: () => openDrawer(), closeDrawer,
     // 常驻栏展开：面板从左边弹进来（右边内容已经让出位置）
     dockIn: () => MO.spring(drawerEl.querySelector(".drawer-panel"), "snap", (p) => ({ transform: `translateX(${(MO.rtl() ? 100 : -100) * (1 - p)}%)` })) });
-  window.__cc = { view, srv, state, send, abort, openSession, newConversation, openPage, bus: onBus,   // bus：测试时往前端灌事件
+  function appearanceDraft(text, attachments) {
+    const refs = attachments.map(attRef).filter(ref => !text.includes(ref));
+    return [text, ...refs].filter(part => part !== "").join("\n");
+  }
+  function appearanceSnapshot() {
+    draftPersist();
+    return { sid:view.sessionId || "", project:view.projectId || "", draft:appearanceDraft(inputEl.value, state.attachments) };
+  }
+  function applyAppearanceSession(packet) {
+    if (!packet || typeof packet.id !== "string" || typeof packet.sid !== "string" ||
+        !/^(?:multi:[a-z\d_-]{1,100})?$/i.test(packet.sid) || typeof packet.draft !== "string") return false;
+    const sid = packet.sid, all = draftsRead(), row = all[sid] || {};
+    const text = typeof row.text === "string" ? row.text : "";
+    let attachments = normAtts(row.att || []), now = appearanceDraft(text, attachments);
+    const previous = typeof packet.previous === "string" ? packet.previous : null;
+    let merged = packet.draft;
+    if (now !== merged && now && now !== previous) {
+      if (!merged || merged === previous || now.endsWith("\n\n"+merged)) merged = now;
+      else if (!merged.endsWith("\n\n"+now)) merged = now + "\n\n" + merged;
+    }
+    if (localStorage.getItem("cc.appearance.applied") !== packet.id) {
+      // Native represents attachments with normal Claude file mentions. Restore chips that survived the edit.
+      attachments = attachments.filter(file => merged.includes(attRef(file)));
+      if (merged === now) merged = text;
+      else if (attachments.length) {
+        const refs = new Set(attachments.map(attRef));
+        merged = merged.split("\n").filter(line => !refs.has(line)).join("\n");
+      }
+      all[sid] = { ...row, text:merged, att:attachments, at:Date.now() };
+      if (!draftsSave(all)) return false;
+      localStorage.setItem("cc.appearance.applied", packet.id);
+    }
+    // The outgoing page persisted its composer. Discard stale DOM and sessionStorage copies before draftLoad.
+    inputEl.value = "";
+    state.attachments = [];
+    view.sessionId = sid || null;
+    view.userNav = true;
+    view.projectId = packet.project || null;
+    state.ctxUsed = 0;
+    saveUiState();
+    return true;
+  }
+  function readAppearanceSession() {
+    if (window !== top || !window.CCApp?.restoreFrontend) return Promise.resolve(false);
+    return new Promise(resolve => {
+      let timer;
+      const finish = value => { clearTimeout(timer); delete window.__ccAppearanceReceive; resolve(value); return value; };
+      window.__ccAppearanceReceive = raw => {
+        try { return finish(!!raw && applyAppearanceSession(JSON.parse(raw))); }
+        catch { return finish(false); }
+      };
+      timer = setTimeout(() => finish(false), 3000);
+      try { window.CCApp.restoreFrontend(); } catch { finish(false); }
+    });
+  }
+  window.__cc = { view, srv, state, send, abort, appearanceSnapshot, openSession, newConversation, openPage, bus: onBus,   // bus：测试时往前端灌事件
     openGit, openViewer, openFiles, openDrawer, showWhatsNew, mdEd: () => VW.ed, provCard: (id) => { state.provView = id; renderProvCard(); },
     lin: { prof: linProfOpen, pick: linPickStart, wiz: mergeWizard, get: () => LIN } };   // 脉络：探针直接开剖面 / 多选 / 汇合向导
 
   // ── 启动 ──────────────────────────────────────────────────────────
   (async function boot() {
-    view.sessionId = loadUiState();      // 上次的会话号与用量，先捞回来
+    const previousSession = loadUiState();
+    const fromAppearance = window === top && window.CCApp?.restoreFrontend ? await readAppearanceSession() : false;
+    if (!fromAppearance) view.sessionId = previousSession;
     draftLoad(view.sessionId);           // 进程被杀前没发的草稿也捞回来（0.6.9 审计 195-D.3）
     updateCtx(state.ctxUsed, state.ctxTotal);
     setStatus(t("正在连接网关…"));
@@ -562,7 +619,7 @@
     // 本地不知道用哪条，就问网关「最近真正跑过哪条会话」—— 总比默默开个新会话强；
     // 用户在 /api/status 回来之前已经自己点了新对话 / 打开过会话，就不接（FIND-003，规则见 04 的 adoptLastSession）
     if (view.sessionId?.startsWith("multi:")) openSession(view.sessionId, null, null, {keepPage:true});
-    else adoptLastSession(state.serverStatus?.lastSessionId);
+    else if (!fromAppearance) adoptLastSession(state.serverStatus?.lastSessionId);
     connectBus(false);                   // hello 到了就会去取历史 / 接上正在跑的那一轮
 
     await Promise.all([loadSettings(), loadCaps(), loadSessions()]);

@@ -36,6 +36,8 @@ function setup(t) {
 test("outgoing native session selects context, target resumes its own thread on return", async t => {
   const { db, id, calls, send } = setup(t);
   const req = await send("claude", "design");
+  assert.equal(db.resolveId(id), id);
+  assert.equal(db.resolveId("claude-native"), id);
   db.send(req);
   await send("codex", "implement", {mode:"third-party",provider:"custom",model:"cheap",destinationModel:"target-model"});
   await send("claude", "review");

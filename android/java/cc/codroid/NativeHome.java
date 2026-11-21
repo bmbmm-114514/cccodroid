@@ -1,7 +1,6 @@
 package cc.codroid;
 
 import android.app.AlertDialog;
-import android.content.Intent;
 import android.content.res.Configuration;
 import android.net.Uri;
 import android.util.TypedValue;
@@ -235,6 +234,10 @@ public class NativeHome {
     }
 
     public void req(String verb, String path, JSONObject data, Consumer<JSONObject> ok) {
+        req(verb, path, data, ok, this::notice);
+    }
+
+    public void req(String verb, String path, JSONObject data, Consumer<JSONObject> ok, Consumer<String> failed) {
         if (disposed) return;
         final int captureGen = generation;
         NativeRequests.call(a, verb, path, data,
@@ -251,7 +254,7 @@ public class NativeHome {
                         return;
                     }
                     String msg = (err != null && !err.isEmpty()) ? err : "网络请求失败 (" + verb + " " + path + ")";
-                    notice(msg);
+                    failed.accept(msg);
                 }
         );
     }
@@ -339,13 +342,14 @@ public class NativeHome {
     }
 
     public void openUrl(String url) {
-        if (url == null || url.trim().isEmpty() || disposed) return;
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url.trim()));
-            a.startActivity(intent);
-        } catch (Exception e) {
-            notice("无法打开外部链接: " + e.getMessage());
+        if (url == null || disposed) return;
+        Uri uri = Uri.parse(url.trim());
+        if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+                || uri.getHost() == null || MainActivity.isGatewayUrl(uri.toString())) {
+            notice("无法打开这个链接");
+            return;
         }
+        BrowserActivity.open(a, uri.toString());
     }
 
     public static String encode(String query) {

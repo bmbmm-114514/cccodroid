@@ -163,3 +163,24 @@ test("editMcp：校验（找不到、坏名字、坏地址）", async () => {
   assert.match((await editMcp({ name: "e4", newName: "-bad", transport: "http", target: "http://x/mcp" })).message, /名字只能/);
   assert.match((await editMcp({ name: "e4", transport: "http", target: "notaurl" })).message, /http/);
 });
+
+test("原生编辑器使用不含密钥的版本号，拒绝并发提交旧的凭据表单", async () => {
+  const name = "native-editor";
+  saveExtOff({ mcp: { [name]: { type: "http", url: "https://example.invalid", headers: {
+    Authorization: "fixture-old", "X-Keep": "fixture-untouched" } } } });
+  const before = await getMcp({ name });
+  assert.ok(before.revision);
+  assert.ok(!JSON.stringify(before).includes("fixture-"));
+  const args = { name, transport: "http", target: "https://example.invalid", expectedRevision: before.revision };
+  const [first, stale] = await Promise.all([
+    editMcp({ ...args, headers: ["Authorization: fixture-updated"] }),
+    editMcp({ ...args, dropHeaders: ["Authorization"] }),
+  ]);
+  assert.equal(first.ok, true);
+  assert.equal(stale.code, "stale");
+  const saved = JSON.parse(fs.readFileSync(EXT_OFF_FILE, "utf8")).mcp[name];
+  assert.deepEqual(saved.headers, { Authorization: "fixture-updated", "X-Keep": "fixture-untouched" });
+  const afterEdit = await getMcp({ name });
+  assert.notEqual(afterEdit.revision, before.revision);
+  assert.ok(!JSON.stringify(afterEdit).includes("fixture-"));
+});

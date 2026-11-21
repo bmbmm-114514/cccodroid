@@ -211,3 +211,26 @@ test("保存失败：POST /api/sched 回 500 write_failed，任务不留在内�
     assert.equal(S.DB.tasks.some((t) => t.name === "写不进"), false);
   } finally { fs.rmSync(file, { recursive: true, force: true }); fs.writeFileSync(file, old); }
 });
+
+test("原生高级选项分字段保存，只拦截同一字段的陈旧编辑", async () => {
+  const url = 'http://127.0.0.1:' + srv.address().port + '/api/sched';
+  const send = async (path, method, body) => fetch(path, { method, body: JSON.stringify(body) });
+  const oldConditions = { wifi: false, charging: true, battery: 15 };
+  const conditions = { wifi: true, charging: true, battery: 50 };
+  const question = await send(url, "POST", { name: "native-condition", prompt: "fixture", on: false,
+    cond: oldConditions, until: { kind: "count", count: 7 }, limitMin: 20, retry: 1, saveSession: false });
+  assert.equal(question.status, 200);
+  const task = (await question.json()).task;
+  const path = url + '/' + task.id;
+  try {
+    assert.equal((await send(path, "PATCH", { retry: 2, expected: { retry: 1 } })).status, 200);
+    assert.equal((await send(path, "PATCH", { cond: conditions, expected: { cond: oldConditions } })).status, 200);
+    assert.equal((await send(path, "PATCH", { cond: oldConditions, expected: { cond: oldConditions } })).status, 409);
+    const result = JSON.parse(fs.readFileSync(CFG.home + '/ccapp-sched.json')).tasks.find(t => t.id === task.id);
+    assert.deepEqual(result.cond, conditions);
+    assert.equal(result.retry, 2);
+    assert.equal(result.until.count, 7);
+    assert.equal(result.saveSession, false);
+    assert.equal(result.limitMin, 20);
+  } finally { await send(path, "DELETE", {}); }
+});

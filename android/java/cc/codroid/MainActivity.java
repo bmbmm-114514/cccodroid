@@ -720,6 +720,7 @@ public class MainActivity extends Activity {
 
     private void copyShares(java.util.ArrayList<android.net.Uri> uris, String text) {
         final String owner = nativeHome == null ? null : nativeHome.chatId;
+        if (nativeHome != null && !"chat".equals(nativeHome.screen)) nativeHome.nav("chat");
         new Thread(() -> {
           try {
             java.io.File dir = new java.io.File(env.workspace(), "uploads");
@@ -1732,6 +1733,28 @@ public class MainActivity extends Activity {
         nativeHome = new NativeHome(this, () -> NativeAppearance.choose(this));
     }
 
+    void switchToClassic(String skin) {
+        if (nativeHome != null) NativeAppearance.toClassic(this, nativeHome, skin);
+    }
+
+    private boolean appearanceMainPage(WebView owner) {
+        if (owner == null || owner != web || isDestroyed() || isFinishing()) return false;
+        String url = owner.getUrl();
+        return isOwnGateway(url) && "/".equals(Uri.parse(url).getPath());
+    }
+
+    private void restoreClassicConversation(WebView owner) {
+        if (!appearanceMainPage(owner)) return;
+        String packet = NativeAppearance.pendingClassicConversation(this);
+        String origin = "http://" + Uri.parse(owner.getUrl()).getEncodedAuthority();
+        String js = "window===top && location.origin===" + org.json.JSONObject.quote(origin)
+                + " && location.pathname==='/' && window.__ccAppearanceReceive && window.__ccAppearanceReceive("
+                + (packet.isEmpty() ? "null" : org.json.JSONObject.quote(packet)) + ")";
+        owner.evaluateJavascript(js, reply -> {
+            if (appearanceMainPage(owner) && "true".equals(reply) && !packet.isEmpty()) NativeAppearance.acknowledgeClassic(this, packet);
+        });
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private void showWeb() {
         // 后台线程（首装、替换工具包）收尾时界面可能已经被划掉：别在死掉的界面上新建 WebView，
@@ -1872,6 +1895,7 @@ public class MainActivity extends Activity {
                 if (pendingSid != null && isOwnGateway(url)) { String sid = pendingSid; pendingSid = null; openSession(sid); }
             }
         });
+        final WebView appearanceOwner = web;
         web.addJavascriptInterface(new Object() {
             // 有副作用的方法第一个参数是口令 k（见 Env.BRIDGE_KEY）；界面在 theme.js 里包一层自动带上，调用处照旧写
             @android.webkit.JavascriptInterface public boolean keyed() { return true; }
@@ -1880,7 +1904,18 @@ public class MainActivity extends Activity {
              *  只靠 JS focus() 只有边框变色，既没光标也没键盘。 */
             @android.webkit.JavascriptInterface public String takeClassicSkin(String k) { return Env.bridgeOk(k) ? NativeAppearance.takeClassicSkin(MainActivity.this) : ""; }
             @android.webkit.JavascriptInterface public void chooseFrontend(String k) {
-                if (Env.bridgeOk(k)) ui.post(() -> NativeAppearance.choose(MainActivity.this));
+                if (Env.bridgeOk(k)) ui.post(() -> { if (appearanceMainPage(appearanceOwner)) NativeAppearance.choose(MainActivity.this); });
+            }
+            @android.webkit.JavascriptInterface public void chooseFrontendState(String k, String json) {
+                if (!Env.bridgeOk(k)) return;
+                ui.post(() -> {
+                    if (!appearanceMainPage(appearanceOwner)) return;
+                    try { NativeAppearance.choose(MainActivity.this, new org.json.JSONObject(json)); }
+                    catch (Exception e) { android.widget.Toast.makeText(MainActivity.this, "无法读取当前草稿", android.widget.Toast.LENGTH_SHORT).show(); }
+                });
+            }
+            @android.webkit.JavascriptInterface public void restoreFrontend(String k) {
+                if (Env.bridgeOk(k)) ui.post(() -> restoreClassicConversation(appearanceOwner));
             }
             @android.webkit.JavascriptInterface public void inputFocus(String k) { if (!Env.bridgeOk(k)) return;
                 ui.post(() -> {

@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.os.Build;
 import android.util.TypedValue;
+import android.widget.Toast;
+import org.json.JSONObject;
 
 /**
  * Native Android Monet and classic appearance manager.
@@ -49,7 +51,9 @@ public final class NativeAppearance {
      * Preserves user fonts and classic theme settings when toggling modes.
      * Recreates the activity only when a selection actually changes.
      */
-    public static void choose(MainActivity a) {
+    public static void choose(MainActivity a) { choose(a, null); }
+
+    static void choose(MainActivity a, JSONObject webState) {
         if (a == null || a.isFinishing()) return;
 
         SharedPreferences prefs = a.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -89,19 +93,105 @@ public final class NativeAppearance {
             }
 
             if (changed) {
-                SharedPreferences.Editor editor = prefs.edit();
-                editor.putString(KEY_FRONTEND, targetIsNative ? FRONTEND_ANDROID : FRONTEND_CLASSIC);
-                if (!targetIsNative) {
-                    editor.putString(PENDING_SKIN, targetClassicTheme);
-                }
-                editor.apply();
-                a.recreate();
+                if (currentIsNative) a.switchToClassic(targetClassicTheme);
+                else if (targetIsNative) switchToNative(a, webState);
+                else finishChange(a, prefs.edit().putString(PENDING_SKIN, targetClassicTheme));
+
             }
         });
         builder.setNegativeButton("取消", null);
 
         AlertDialog dialog = builder.create();
         dialog.show();
+    }
+
+    private static final String WEB_PACKET = "pending_web_conversation";
+    private static SharedPreferences prefs(Context a) {
+        return a.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    }
+
+    private static void finishChange(MainActivity a, SharedPreferences.Editor edit) {
+        if (edit.commit()) a.recreate();
+        else Toast.makeText(a, "无法保存当前会话，请释放存储空间后重试", Toast.LENGTH_LONG).show();
+    }
+
+    static boolean validId(String id) {
+        return id.isEmpty() || id.matches("(?:multi:)?[a-zA-Z0-9_-]{1,100}");
+    }
+
+    static boolean validSnapshot(JSONObject state) {
+        return state != null && state.opt("sid") instanceof String && validId(state.optString("sid"))
+                && state.opt("draft") instanceof String && state.opt("project") instanceof String
+                && (state.optString("project").isEmpty() || state.optString("project").matches("[a-zA-Z0-9_-]{1,100}"));
+    }
+
+    static String mergeDraft(String current, String incoming, String previous) {
+        if (current.equals(incoming) || current.isEmpty() || current.equals(previous)) return incoming;
+        if (incoming.isEmpty() || incoming.equals(previous) || current.endsWith("\n\n"+incoming)) return current;
+        if (incoming.endsWith("\n\n"+current)) return incoming;
+        return current + "\n\n" + incoming;
+    }
+
+    static void toClassic(MainActivity a, NativeHome home, String skin) {
+        String sid = home.chatId.isEmpty() ? "" : "multi:" + home.chatId;
+        String draft = NativeChat.readThemeDraft(a, home.chatId);
+        SharedPreferences prefs = prefs(a);
+        JSONObject packet = NativeHome.json("sid", sid, "project", home.projectId, "draft", draft,
+                "id", java.util.UUID.randomUUID().toString());
+        if (sid.equals(prefs.getString("web_source_sid", null))) {
+            try { packet.put("previous", prefs.getString("web_source_draft", "")); } catch (org.json.JSONException ignored) {}
+        }
+        finishChange(a, prefs.edit().putString(WEB_PACKET, packet.toString())
+                .putString("native_source_sid", sid).putString("native_source_draft", draft)
+                .putString(PENDING_SKIN, skin).putString(KEY_FRONTEND, FRONTEND_CLASSIC));
+    }
+
+    private static void switchToNative(MainActivity a, JSONObject state) {
+        if (!validSnapshot(state)) {
+            Toast.makeText(a, "会话还在加载，请稍后再切换", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String sid = state.optString("sid");
+        if (sid.isEmpty() || sid.startsWith("multi:")) {
+            finishNative(a, state, sid.isEmpty() ? "" : sid.substring(6));
+        } else {
+            AlertDialog waiting = new AlertDialog.Builder(a).setMessage("正在打开原 Claude 会话…")
+                    .setNegativeButton("取消", null).show();
+            NativeRequests.call(a, "POST", "/api/multi/create", NativeHome.json("claudeSessionId", sid), result -> {
+                if (!waiting.isShowing()) return;
+                waiting.dismiss();
+                String id = result.optString("id");
+                if (!id.isEmpty() && validId(id) && !id.contains(":")) finishNative(a, state, id);
+                else Toast.makeText(a, "未能打开原会话", Toast.LENGTH_LONG).show();
+            }, error -> {
+                if (!waiting.isShowing()) return;
+                waiting.dismiss();
+                Toast.makeText(a, error, Toast.LENGTH_LONG).show();
+            });
+        }
+    }
+
+    private static void finishNative(MainActivity a, JSONObject state, String sharedId) {
+        SharedPreferences prefs = prefs(a);
+        String sid = sharedId.isEmpty() ? "" : "multi:" + sharedId;
+        String previous = sid.equals(prefs.getString("native_source_sid", null)) ? prefs.getString("native_source_draft", null) : null;
+        String incoming = state.optString("draft");
+        String merged = mergeDraft(NativeChat.readThemeDraft(a, sharedId), incoming, previous);
+        if (!NativeChat.writeThemeDraft(a, sharedId, merged)) {
+            Toast.makeText(a, "无法保存草稿，已保留当前界面", Toast.LENGTH_LONG).show();
+            return;
+        }
+        finishChange(a, prefs.edit().remove(WEB_PACKET).putString("web_source_sid", sid).putString("web_source_draft", incoming)
+                .putString("conversation", sharedId).putString("project", state.optString("project")).putString(KEY_FRONTEND, FRONTEND_ANDROID));
+    }
+
+    static String pendingClassicConversation(MainActivity a) {
+        return prefs(a).getString(WEB_PACKET, "");
+    }
+
+    static void acknowledgeClassic(MainActivity a, String packet) {
+        SharedPreferences prefs = prefs(a);
+        if (packet.equals(prefs.getString(WEB_PACKET, ""))) prefs.edit().remove(WEB_PACKET).apply();
     }
 
     static String takeClassicSkin(Activity a) {

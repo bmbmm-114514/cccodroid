@@ -25,7 +25,9 @@ final class NativeRequests {
                 byte[] bytes = body == null ? null : body.toString().getBytes(StandardCharsets.UTF_8);
                 connection = Env.gateway(verb, path, bytes);
                 connection.setConnectTimeout(8000);
-                connection.setReadTimeout(90000);
+                int timeout = 90;
+                if ("/api/ext/hooks/test".equals(path) && body != null) timeout = 10 + Math.max(1, Math.min(600, body.optInt("timeout", 60)));
+                connection.setReadTimeout(timeout * 1000);
                 if (bytes != null) {
                     connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
                     connection.setDoOutput(true);

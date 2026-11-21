@@ -146,7 +146,7 @@ async function createConversation(b) {
     return db.create({ cwd: project?.path || CFG.workspace, projectId: project?.id || "", title: b.title });
   }
   const origin = b.claudeSessionId;
-  const existing = db.imported(origin);
+  const existing = db.resolveId(origin);
   if (existing) return existing;
   const entry = findSessionFile(origin);
   if (!entry) throw problem("找不到原 Claude 会话", 404);

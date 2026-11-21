@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import { CFG, LIVE, log, tz } from "./config.mjs";
 import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
 import { guarded } from "./crashguard.mjs";
@@ -823,6 +824,14 @@ export async function routeSched(req, res, u, p) {
   }
   if (!sub && req.method === "PATCH") {
     const b = await body();
+    if (b.expected !== undefined) {
+      if (!isObj(b.expected)) return sendJson(res, 400, { error: "bad expected task fields" });
+      const changed = Object.keys(b).filter(k => k !== "expected");
+      const snapshot = JSON.parse(JSON.stringify(t));
+      if (changed.some(k => !isDeepStrictEqual(b.expected[k], snapshot[k]))) {
+        return sendJson(res, 409, { error: "stale", message: tz("任务已修改，请重新打开后编辑") });
+      }
+    }
     try { clean(b, {}); } catch (e) { return sendJson(res, 400, { error: e.message }); }
     const before = { ...t }, pending = DB.pending;
     Object.assign(t, clean(b, t));
