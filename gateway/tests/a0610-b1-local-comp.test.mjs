@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { CFG, PREFIX } from "../gw/config.mjs";
 import { COMP_DIR, compRecords, compRemove, reapComponentRuns, sha256File } from "../gw/components.mjs";
 import { modManifest, modSpaceNeed } from "../gw/modules.mjs";
@@ -66,17 +67,20 @@ test("卸载 A 时，B（安装中）声明的共享文件留下并转给 B（#1
   assert.ok(b.files.includes("bin/shared"), "留下来的文件要记到 B 名下");
 });
 
-test("启动时清掉上一任网关留下的组件子进程（195-T.4）", async () => {
-  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { detached: true, stdio: "ignore" });
+test("启动时清掉上一任网关留下的组件子进程（195-T.4）", async (t) => {
   const dir = path.join(COMP_DIR, ".runs");
   fs.mkdirSync(dir, { recursive: true });
   const mark = path.join(dir, `test-${process.pid}.json`);
+  const child = spawn(process.execPath, ["-e", 'process.send("ready"); setTimeout(() => {}, 30000)'], {
+    detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  t.after(() => { child.kill("SIGKILL"); fs.rmSync(mark, { force: true }); });
+  // spawn 刚返回时 /proc/<pid>/cmdline 可能还没切到目标程序。收到子程序消息后再让清理器认领它。
+  await once(child, "message", { signal: AbortSignal.timeout(10000) });
   fs.writeFileSync(mark, JSON.stringify({ pid: child.pid, cmd: process.execPath, args: "" }));
-  const closed = new Promise((res) => child.once("close", (code, sig) => res({ code, sig })));
-  const n = reapComponentRuns();
-  assert.ok(n >= 1);
-  const r = await Promise.race([closed, new Promise((res) => setTimeout(() => res(null), 3000))]);
-  assert.ok(r, "子进程应当被结束");
+  const closed = once(child, "close", { signal: AbortSignal.timeout(3000) });
+  assert.ok(reapComponentRuns() >= 1);
+  await closed;
   assert.ok(!fs.existsSync(mark), "运行标记要清掉");
 });
 
