@@ -48,6 +48,13 @@ function setAccount(a) {
 }
 async function client() {
   if (!clientPromise) clientPromise = codexOptions().then(options => createCodexClient({ ...options, onEvent(e) {
+    if (e.type === "disconnect") {
+      endLogin();
+      setAccount(null);
+      codexError = e.error;
+      // An explicit login can retry immediately. Background polling must not respawn a broken executable on every refresh.
+      refreshed = Date.now();
+    }
     if (e.type === "quota") applyLimits(e);
     if (e.type === "account") { setAccount(e.account); refreshed = 0; }
     if (e.type === "login") { endLogin(); refreshed = 0; codexError = e.success ? "" : String(e.error || "Codex 登录失败"); }
@@ -60,7 +67,10 @@ function refreshAccount() {
   refreshTask = (async () => {
     const api = await client();
     setAccount((await api.account()).account);
-    if (account?.type === "chatgpt") applyLimits(await api.limits());
+    if (account?.type === "chatgpt") {
+      applyLimits(await api.limits());
+      codexError = "";
+    }
   })().catch(e => { codexError = e.message; }).finally(() => { refreshTask = null; });
 }
 let loginRelease, loginTimeout;

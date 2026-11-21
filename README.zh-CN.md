@@ -9,7 +9,7 @@
 - 收到有效额度数据后，当前 Agent 的适用额度窗口剩余 5% 或更少时会提醒。Antigravity 使用官方 CLI 的内建 `/usage` 命令读取订阅额度，未返回有效百分比时显示未知。
 - 可从旧 Claude 对话的菜单打开多 Agent 模式。原版和独立版安装在同一台手机时各有自己的数据目录，从原版导出、在独立版导入后即可选择旧会话。
 
-测试版 0.1.0 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
+测试版 0.1.1 面向 Android 8.0 及以上的 arm64 设备，使用独立包名 `cc.agentui`，可以与原版同装。构建产物为 `dist/cccodroid-multi-agent.apk`，当前目标 SDK 为 28。
 
 下文保留上游 cccodroid 的介绍与原版下载链接。
 

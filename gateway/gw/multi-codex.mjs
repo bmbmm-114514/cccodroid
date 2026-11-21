@@ -1,5 +1,5 @@
 // OpenAI app-server v2 stdio client. Native thread IDs stay with their Codex installation.
-import { AgentTransport, deferred } from "./multi-rpc.mjs";
+import { AgentTransport, deferred, publicAgentError } from "./multi-rpc.mjs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -57,6 +57,7 @@ export function createCodexClient(options = {}) {
     ready = null;
     approvals.clear();
     for (const run of runs.values()) run.done.reject(err);
+    if (rpc.initialized && !rpc.intentionalClose) emit(null, { type: "disconnect", error: err.message });
   }
 
   function connect() {
@@ -71,6 +72,7 @@ export function createCodexClient(options = {}) {
       clientInfo: { name: "cccodroid", title: "cccodroid", version: "1.0.0" }, capabilities: { experimentalApi: true },
     }).then(() => {
       rpc.send({ method: "initialized" });
+      rpc.initialized = true;
       return rpc;
     }).catch((err) => { rpc.close(err); throw err; });
     return ready;
@@ -126,7 +128,7 @@ export function createCodexClient(options = {}) {
     } else if (msg.method === "turn/completed") {
       const turn = p.turn;
       if (run.signal?.aborted || turn.status === "interrupted") run.done.reject(stopped());
-      else if (turn.status !== "completed") run.done.reject(new Error(turn.error?.message || "Codex 回合失败"));
+      else if (turn.status !== "completed") run.done.reject(new Error(publicAgentError(turn.error?.message, "Codex 回合失败")));
       else {
         for (const item of turn.items || []) {
           if (item.type === "agentMessage" && typeof item.text === "string") run.items.set(item.id, item.text);
@@ -140,8 +142,10 @@ export function createCodexClient(options = {}) {
     const p = msg.params || {};
     if (msg.method === "account/rateLimits/updated") return emit(null, { type: "quota", ...p });
     if (msg.method === "account/updated" || msg.method === "account/login/completed") {
-      if (msg.method === "account/login/completed") emit(null, { type: "login", success: p.success, error: p.error || null });
-      account().then((r) => emit(null, { type: "account", account: r.account })).catch(() => {});
+      if (msg.method === "account/login/completed") emit(null, { type: "login", success: p.success, error: p.error ? publicAgentError(p.error, "Codex 登录失败") : null });
+      rpc.request("account/read", { refreshToken: false }).then((r) => {
+        if (rpc === transport) emit(null, { type: "account", account: r.account });
+      }).catch(() => {});
       return;
     }
     if (msg.method === "serverRequest/resolved") {
@@ -265,7 +269,7 @@ export function createCodexClient(options = {}) {
     account, login, limits, respond, handoff, run: (p) => execute(p),
     fork: (p, provider) => execute(p, { provider }),
     close() {
-      transport?.close();
+      if (transport) { transport.intentionalClose = true; transport.close(); }
       for (const worker of handoffs) worker.close();
     },
   };

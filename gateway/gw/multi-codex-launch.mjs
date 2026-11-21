@@ -36,12 +36,17 @@ function androidTunnel() {
   return tunnel;
 }
 
-export async function codexOptions() {
-  const binary = await verifiedCodex();
+export async function codexOptions({ home = CFG.home, verifyBinary = verifiedCodex } = {}) {
+  const binary = await verifyBinary();
+  // An explicit CODEX_HOME must already exist when the official app-server starts.
+  const profile = path.join(home, ".codex");
+  const temp = path.join(profile, "tmp");
+  await fs.promises.mkdir(temp, { recursive: true, mode: 0o700 });
   const env = glibcEnv();
   for (const key of ["LD_LIBRARY_PATH", "NODE_OPTIONS", "NODE_PATH", "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"]) delete env[key];
-  env.HOME = CFG.home;
-  env.CODEX_HOME = path.join(CFG.home, ".codex");
+  env.HOME = home;
+  env.CODEX_HOME = profile;
+  env.TMPDIR = temp;
   if (PREFIX) {
     env.PATH = [path.join(PREFIX, "bin"), "/system/bin", env.PATH].filter(Boolean).join(":");
     env.SHELL = path.join(PREFIX, "bin", "bash");
